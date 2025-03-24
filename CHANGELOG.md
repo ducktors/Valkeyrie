@@ -1,5 +1,11 @@
 # valkeyrie
 
+## 0.4.1
+
+### Patch Changes
+
+- 9041029: feat: add asyncDispose and dispose symbols
+
 ## 0.4.0
 
 ### Minor Changes
