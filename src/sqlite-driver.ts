@@ -1,12 +1,22 @@
 import { DatabaseSync } from 'node:sqlite'
+import { setTimeout } from 'node:timers/promises'
 import { type DriverValue, defineDriver } from './driver.js'
 import type { Serializer } from './serializers/serializer.js'
 import { v8Serializer } from './serializers/v8.js'
 
-type SqlTable = Pick<DriverValue, 'versionstamp'> & {
+type SqlRow = Pick<DriverValue, 'versionstamp'> & {
   key_hash: string
   value: Uint8Array
   is_u64: number
+}
+
+// Global write queue to ensure atomic operations are serialized
+const writeQueue: Array<() => Promise<void>> = []
+let isProcessing = false
+
+interface SqliteError extends Error {
+  code?: string
+  message: string
 }
 
 export const sqliteDriver = defineDriver(
@@ -15,7 +25,7 @@ export const sqliteDriver = defineDriver(
 
     db.exec(`
     PRAGMA synchronous = NORMAL;
-    PRAGMA journal_mode = WAL2
+    PRAGMA journal_mode = WAL;
     `)
 
     // Create the KV table with versioning and expiry support
@@ -33,7 +43,7 @@ export const sqliteDriver = defineDriver(
 
     CREATE INDEX IF NOT EXISTS idx_kv_store_key_hash
     ON kv_store(key_hash);
-  `)
+    `)
 
     const statements = {
       get: db.prepare(
@@ -60,14 +70,81 @@ export const sqliteDriver = defineDriver(
       ? customSerializer()
       : v8Serializer())
 
+    // Global watch queue to store watchers
+    const watchQueue: Array<{
+      keyHashes: string[]
+      controller: ReadableStreamDefaultController<
+        (DriverValue | { keyHash: string; value: null; versionstamp: null })[]
+      >
+    }> = []
+
+    // Function to notify watchers of changes
+    async function notifyWatchers() {
+      const now = Date.now()
+      for (const watcher of watchQueue) {
+        const results = await Promise.all(
+          watcher.keyHashes.map(async (keyHash) => {
+            const result = statements.get.get(keyHash, now) as
+              | SqlRow
+              | undefined
+            if (!result) {
+              return {
+                keyHash,
+                value: null,
+                versionstamp: null,
+              }
+            }
+            return {
+              keyHash: result.key_hash,
+              value: serializer.deserialize(result.value),
+              versionstamp: result.versionstamp,
+            }
+          }),
+        )
+        watcher.controller.enqueue(results)
+      }
+    }
+
+    async function processWriteQueue() {
+      if (isProcessing || writeQueue.length === 0) return
+      isProcessing = true
+
+      try {
+        while (writeQueue.length > 0) {
+          const operation = writeQueue.shift()
+          if (operation) {
+            await operation()
+          }
+        }
+      } finally {
+        isProcessing = false
+      }
+    }
+
     return {
       close: async () => {
+        // Cancel all watchers
+        for (const watcher of watchQueue) {
+          try {
+            watcher.controller.close()
+          } catch (error: unknown) {
+            // Ignore errors from already closed controllers
+            if (
+              error &&
+              typeof error === 'object' &&
+              'code' in error &&
+              error.code === 'ERR_INVALID_STATE'
+            ) {
+              continue
+            }
+            throw error
+          }
+        }
+        watchQueue.length = 0
         db.close()
       },
       get: async (keyHash: string, now: number) => {
-        const result = (await statements.get.get(keyHash, now)) as
-          | SqlTable
-          | undefined
+        const result = statements.get.get(keyHash, now) as SqlRow | undefined
         if (!result) {
           return undefined
         }
@@ -84,9 +161,11 @@ export const sqliteDriver = defineDriver(
         } else {
           statements.set.run(key, serialized, versionstamp)
         }
+        await notifyWatchers()
       },
       delete: async (keyHash) => {
         statements.delete.run(keyHash)
+        await notifyWatchers()
       },
       list: async (
         startHash,
@@ -111,7 +190,7 @@ export const sqliteDriver = defineDriver(
                 prefixHash,
                 now,
                 limit,
-              )) as SqlTable[]
+              )) as SqlRow[]
         ).map((r) => ({
           keyHash: r.key_hash,
           value: serializer.deserialize(r.value),
@@ -120,17 +199,79 @@ export const sqliteDriver = defineDriver(
       },
       cleanup: async (now) => {
         statements.cleanup.run(now)
+        await notifyWatchers()
       },
       withTransaction: async <T>(callback: () => Promise<T>): Promise<T> => {
-        db.exec('BEGIN TRANSACTION')
-        try {
-          const result = await callback()
-          db.exec('COMMIT')
-          return result
-        } catch (error) {
-          db.exec('ROLLBACK')
-          throw error
-        }
+        return new Promise((resolve, reject) => {
+          writeQueue.push(async () => {
+            while (true) {
+              try {
+                db.exec('BEGIN IMMEDIATE TRANSACTION')
+                const result = await callback()
+                db.exec('COMMIT')
+                await notifyWatchers()
+                resolve(result)
+                return
+              } catch (error: unknown) {
+                db.exec('ROLLBACK')
+                // Check if the error is a SQLite busy error
+                const sqliteError = error as SqliteError
+                if (
+                  sqliteError?.code === 'SQLITE_BUSY' ||
+                  sqliteError?.message?.includes('database is locked')
+                ) {
+                  // Random backoff between 5-20ms, similar to Deno KV
+                  const backoff = 5 + Math.random() * 15
+
+                  await setTimeout(backoff)
+                  continue
+                }
+                reject(error)
+                return
+              }
+            }
+          })
+          processWriteQueue()
+        })
+      },
+      watch: (keyHashes: string[]) => {
+        return new ReadableStream({
+          start(controller) {
+            watchQueue.push({ keyHashes, controller })
+            // Send initial values
+            const now = Date.now()
+            Promise.all(
+              keyHashes.map(async (keyHash) => {
+                const result = statements.get.get(keyHash, now) as
+                  | SqlRow
+                  | undefined
+                if (!result) {
+                  return {
+                    keyHash,
+                    value: null,
+                    versionstamp: null,
+                  }
+                }
+                return {
+                  keyHash: result.key_hash,
+                  value: serializer.deserialize(result.value),
+                  versionstamp: result.versionstamp,
+                }
+              }),
+            ).then((results) => {
+              controller.enqueue(results)
+            })
+          },
+          cancel(controller) {
+            const index = watchQueue.findIndex(
+              (w) => w.controller === controller,
+            )
+            if (index !== -1) {
+              watchQueue.splice(index, 1)
+            }
+            controller.close()
+          },
+        })
       },
     }
   },

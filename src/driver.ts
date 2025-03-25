@@ -20,6 +20,11 @@ export interface Driver {
   ) => Promise<DriverValue[]>
   cleanup: (now: number) => Promise<void>
   withTransaction: <T>(callback: () => Promise<T>) => Promise<T>
+  watch: (
+    keyHashes: string[],
+  ) => ReadableStream<
+    (DriverValue | { keyHash: string; value: null; versionstamp: null })[]
+  >
 }
 
 export function defineDriver(

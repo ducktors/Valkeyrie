@@ -960,50 +960,39 @@ await db.cleanup();
 
 Valkeyrie supports pluggable serializers that allow you to customize how values are stored in the database:
 
-```typescript
-import { Valkeyrie, jsonSerializer } from 'valkeyrie';
-
-// Using the JSON serializer
-const db = await Valkeyrie.open('./data.db', {
-  serializer: jsonSerializer
-});
-```
-
-Valkeyrie comes with several built-in serializers:
-
 - **V8 Serializer (Default)** - Uses Node.js's built-in `node:v8` module for efficient binary serialization
 - **JSON Serializer** - Human-readable format compatible with other programming languages
-- **BSON Serializer** - Uses MongoDB's BSON format for efficient binary serialization
-- **MessagePack Serializer** - Uses the msgpackr library for compact binary serialization
-- **CBOR-X Serializer** - Uses the cbor-x library for high-performance CBOR serialization
+- **BSON Serializer** - Uses MongoDB's BSON format for efficient binary serialization (requires `bson` package)
+- **MessagePack Serializer** - Uses the msgpackr library for compact binary serialization (requires `msgpackr` package)
+- **CBOR-X Serializer** - Uses the cbor-x library for high-performance CBOR serialization (requires `cbor-x` package)
+- **Custom Serializers** - Create your own serializers for specialized needs like compression or encryption
 
-You can also create custom serializers for specialized needs like compression or encryption.
+Note: The BSON, MessagePack, and CBOR-X serializers require their respective packages to be installed as peer dependencies. If you want to use any of these serializers, you'll need to install the corresponding package:
 
-#### Using Different Serializers
+```bash
+# For BSON serializer
+pnpm add bson
+
+# For MessagePack serializer
+pnpm add msgpackr
+
+# For CBOR-X serializer
+pnpm add cbor-x
+```
+
+If you try to use a serializer without its required package installed, you'll get a clear error message indicating which package needs to be installed.
 
 ```typescript
 import { Valkeyrie } from 'valkeyrie';
-import { jsonSerializer } from 'valkeyrie/serializers/json';
 import { bsonSerializer } from 'valkeyrie/serializers/bson';
-import { msgpackrSerializer } from 'valkeyrie/serializers/msgpackr';
 import { cborXSerializer } from 'valkeyrie/serializers/cbor-x';
 
-// Using the JSON serializer
-const dbJson = await Valkeyrie.open('./json-data.db', {
-  serializer: jsonSerializer
-});
-
-// Using the BSON serializer
-const dbBson = await Valkeyrie.open('./bson-data.db', {
+// Using the BSON serializer (requires 'bson' package)
+const dbBson = await Valkeyrie.open('./data.db', {
   serializer: bsonSerializer
 });
 
-// Using the MessagePack serializer
-const dbMsgpack = await Valkeyrie.open('./msgpack-data.db', {
-  serializer: msgpackrSerializer
-});
-
-// Using the CBOR-X serializer
+// Using the CBOR-X serializer (requires 'cbor-x' package)
 const dbCbor = await Valkeyrie.open('./cbor-data.db', {
   serializer: cborXSerializer
 });
