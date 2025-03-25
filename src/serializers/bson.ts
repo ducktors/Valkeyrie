@@ -1,4 +1,4 @@
-import { BSON } from 'bson'
+import { deserialize, serialize } from 'bson'
 import { KvU64 } from '../kv-u64.js'
 import { type SerializedStruct, defineSerializer } from './serializer.js'
 
@@ -25,7 +25,7 @@ export const bsonSerializer = defineSerializer({
           isU64,
         } satisfies SerializedStruct,
       }
-      const serialized = BSON.serialize(wrappedValue)
+      const serialized = serialize(wrappedValue)
 
       // 65536 + 40 bytes for the wrapper object + bson overhead
       if (serialized.length > 65576) {
@@ -44,7 +44,7 @@ export const bsonSerializer = defineSerializer({
   deserialize: (value: Uint8Array): unknown => {
     const {
       value: { value: deserialized, isU64 },
-    } = BSON.deserialize(value) as {
+    } = deserialize(value) as {
       value: SerializedStruct
     }
 
