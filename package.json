@@ -119,12 +119,24 @@
     "onlyBuiltDependencies": [
       "@biomejs/biome",
       "cbor-extract",
-      "esbuild"
+      "esbuild",
+      "msgpackr-extract"
     ]
   },
-  "dependencies": {
+  "peerDependencies": {
     "bson": "^6.10.3",
     "cbor-x": "^1.6.0",
     "msgpackr": "^1.11.2"
+  },
+  "peerDependenciesMeta": {
+    "bson": {
+      "optional": true
+    },
+    "cbor-x": {
+      "optional": true
+    },
+    "msgpackr": {
+      "optional": true
+    }
   }
 }

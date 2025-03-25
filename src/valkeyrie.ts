@@ -4,7 +4,7 @@ import { KvU64 } from './kv-u64.js'
 import type { Serializer } from './serializers/serializer.js'
 import { sqliteDriver } from './sqlite-driver.js'
 
-export type KeyPart = Uint8Array | string | number | bigint | boolean
+export type KeyPart = Uint8Array | string | number | bigint | boolean | symbol
 export type Key = KeyPart[]
 
 interface AtomicCheck {
@@ -55,17 +55,25 @@ export type EntryMaybe<T = unknown> =
       versionstamp: null
     }
 
+const valkeyrieSymbol = Symbol('Valkeyrie')
+const commitVersionstampSymbol = Symbol('ValkeyrieCommitVersionstamp')
 export class Valkeyrie {
-  private static internalConstructor = false
-  private driver: Driver
-  private lastVersionstamp: bigint
-  private closed = false
-  private constructor(functions: Driver) {
-    if (!Valkeyrie.internalConstructor) {
-      throw new TypeError('Use Valkeyrie.open() to create a new instance')
+  #driver: Driver
+  #lastVersionstamp: bigint
+  #isClosed = false
+
+  private constructor(functions: Driver, symbol?: symbol) {
+    if (valkeyrieSymbol !== symbol) {
+      throw new TypeError(
+        'Valkeyrie can not be constructed: use Valkeyrie.open() to create a new instance',
+      )
     }
-    this.driver = functions
-    this.lastVersionstamp = 0n
+    this.#driver = functions
+    this.#lastVersionstamp = 0n
+  }
+
+  commitVersionstamp(): symbol {
+    return commitVersionstampSymbol
   }
 
   /**
@@ -80,16 +88,17 @@ export class Valkeyrie {
       serializer?: () => Serializer
     } = {},
   ): Promise<Valkeyrie> {
-    Valkeyrie.internalConstructor = true
-    const db = new Valkeyrie(await sqliteDriver(path, options.serializer))
-    Valkeyrie.internalConstructor = false
+    const db = new Valkeyrie(
+      await sqliteDriver(path, options.serializer),
+      valkeyrieSymbol,
+    )
     await db.cleanup()
     return db
   }
 
   public async close(): Promise<void> {
-    await this.driver.close()
-    this.closed = true
+    await this.#driver.close()
+    this.#isClosed = true
   }
 
   /**
@@ -121,11 +130,11 @@ export class Valkeyrie {
     const now = BigInt(Date.now()) * 1000n
 
     // Ensure monotonically increasing values even within the same microsecond
-    this.lastVersionstamp =
-      this.lastVersionstamp < now ? now : this.lastVersionstamp + 1n
+    this.#lastVersionstamp =
+      this.#lastVersionstamp < now ? now : this.#lastVersionstamp + 1n
 
     // Convert the BigInt to a hexadecimal string and pad it to 20 characters
-    return this.lastVersionstamp.toString(16).padStart(20, '0')
+    return this.#lastVersionstamp.toString(16).padStart(20, '0')
   }
 
   /**
@@ -347,7 +356,7 @@ export class Valkeyrie {
     }
     const keyHash = this.hashKey(key, 'read')
     const now = Date.now()
-    const result = await this.driver.get(keyHash, now)
+    const result = await this.#driver.get(keyHash, now)
 
     if (!result) {
       return { key, value: null, versionstamp: null }
@@ -382,7 +391,7 @@ export class Valkeyrie {
     const keyHash = this.hashKey(key, 'write')
     const versionstamp = this.generateVersionstamp()
 
-    await this.driver.set(
+    await this.#driver.set(
       keyHash,
       value,
       versionstamp,
@@ -396,7 +405,7 @@ export class Valkeyrie {
     this.throwIfClosed()
     this.validateKeys([key])
     const keyHash = this.hashKey(key)
-    await this.driver.delete(keyHash)
+    await this.#driver.delete(keyHash)
   }
 
   private validatePrefixKey(
@@ -448,7 +457,7 @@ export class Valkeyrie {
         limit === Number.POSITIVE_INFINITY
           ? batchSize
           : Math.min(batchSize, remainingLimit)
-      const results = await this.driver.list(
+      const results = await this.#driver.list(
         currentStartHash,
         currentEndHash,
         prefixHash,
@@ -729,12 +738,12 @@ export class Valkeyrie {
   public async cleanup(): Promise<void> {
     this.throwIfClosed()
     const now = Date.now()
-    this.driver.cleanup(now)
+    this.#driver.cleanup(now)
   }
 
-  public atomic(): Atomic {
+  public atomic(): AtomicOperation {
     this.throwIfClosed()
-    return new Atomic(this)
+    return new AtomicOperation(this)
   }
 
   public async executeAtomicOperation(
@@ -745,7 +754,7 @@ export class Valkeyrie {
     const versionstamp = this.generateVersionstamp()
 
     try {
-      return await this.driver.withTransaction(async () => {
+      return await this.#driver.withTransaction(async () => {
         // Verify all checks pass within the transaction
         for (const check of checks) {
           const result = await this.get(check.key)
@@ -759,20 +768,20 @@ export class Valkeyrie {
           const keyHash = this.hashKey(mutation.key)
 
           if (mutation.type === 'delete') {
-            await this.driver.delete(keyHash)
+            await this.#driver.delete(keyHash)
           } else if (mutation.type === 'set') {
             const serializedValue = mutation.value
 
             if (mutation.expireIn) {
               const expiresAt = Date.now() + mutation.expireIn
-              await this.driver.set(
+              await this.#driver.set(
                 keyHash,
                 serializedValue,
                 versionstamp,
                 expiresAt,
               )
             } else {
-              await this.driver.set(keyHash, serializedValue, versionstamp)
+              await this.#driver.set(keyHash, serializedValue, versionstamp)
             }
           } else if (
             mutation.type === 'sum' ||
@@ -784,25 +793,12 @@ export class Valkeyrie {
 
             if (currentValue.value === null) {
               newValue = mutation.value
-            } else if (
-              (mutation.type === 'sum' ||
-                mutation.type === 'min' ||
-                mutation.type === 'max') &&
-              !(currentValue.value instanceof KvU64)
-            ) {
+            } else if (!(currentValue.value instanceof KvU64)) {
               throw new TypeError(
                 `Failed to perform '${mutation.type}' mutation on a non-U64 value in the database`,
               )
-            } else if (
-              typeof currentValue.value === 'number' ||
-              typeof currentValue.value === 'bigint' ||
-              currentValue.value instanceof KvU64
-            ) {
-              const current = BigInt(
-                currentValue.value instanceof KvU64
-                  ? currentValue.value.value
-                  : currentValue.value,
-              )
+            } else {
+              const current = currentValue.value.value
               if (mutation.type === 'sum') {
                 newValue = new KvU64(
                   (current + mutation.value.value) & 0xffffffffffffffffn,
@@ -820,13 +816,9 @@ export class Valkeyrie {
                     : mutation.value.value,
                 )
               }
-            } else {
-              throw new TypeError(
-                `Invalid value type for ${mutation.type} operation`,
-              )
             }
 
-            await this.driver.set(keyHash, newValue, versionstamp)
+            await this.#driver.set(keyHash, newValue, versionstamp)
           }
         }
 
@@ -849,14 +841,38 @@ export class Valkeyrie {
   }
 
   private throwIfClosed(): void {
-    if (this.closed) {
+    if (this.#isClosed) {
       throw new Error('Database is closed')
     }
+  }
+
+  public watch<T extends readonly unknown[]>(
+    keys: Key[],
+  ): ReadableStream<EntryMaybe<T[number]>[]> {
+    this.throwIfClosed()
+    this.validateKeys(keys)
+    if (keys.length === 0) {
+      throw new Error('Keys cannot be empty')
+    }
+    const keyHashes = keys.map((key) => this.hashKey(key))
+    return this.#driver.watch(keyHashes).pipeThrough(
+      new TransformStream({
+        transform: (chunk, controller) => {
+          controller.enqueue(
+            chunk.map((entry) => ({
+              key: this.decodeKeyHash(entry.keyHash),
+              value: entry.value as T[number],
+              versionstamp: entry.versionstamp as string,
+            })),
+          )
+        },
+      }),
+    )
   }
 }
 
 // Internal class - not exported
-class Atomic {
+export class AtomicOperation {
   private checks: Check[] = []
   private mutations: Mutation[] = []
   private valkeyrie: Valkeyrie
@@ -880,7 +896,7 @@ class Atomic {
     }
   }
 
-  check(...checks: AtomicCheck[]): Atomic {
+  check(...checks: AtomicCheck[]): AtomicOperation {
     for (const check of checks) {
       if (this.checks.length >= 100) {
         throw new TypeError('Too many checks (max 100)')
@@ -892,7 +908,7 @@ class Atomic {
     return this
   }
 
-  mutate(...mutations: Mutation[]): Atomic {
+  mutate(...mutations: Mutation[]): AtomicOperation {
     for (const mutation of mutations) {
       if (this.mutations.length >= 1000) {
         throw new TypeError('Too many mutations (max 1000)')
@@ -954,7 +970,11 @@ class Atomic {
     return this
   }
 
-  set<T = unknown>(key: Key, value: T, options: SetOptions = {}): Atomic {
+  set<T = unknown>(
+    key: Key,
+    value: T,
+    options: SetOptions = {},
+  ): AtomicOperation {
     return this.mutate({
       type: 'set',
       key,
@@ -963,21 +983,21 @@ class Atomic {
     })
   }
 
-  delete(key: Key): Atomic {
+  delete(key: Key): AtomicOperation {
     return this.mutate({ type: 'delete', key })
   }
 
-  sum(key: Key, value: bigint | KvU64): Atomic {
+  sum(key: Key, value: bigint | KvU64): AtomicOperation {
     const u64Value = value instanceof KvU64 ? value : new KvU64(BigInt(value))
     return this.mutate({ type: 'sum', key, value: u64Value })
   }
 
-  max(key: Key, value: bigint | KvU64): Atomic {
+  max(key: Key, value: bigint | KvU64): AtomicOperation {
     const u64Value = value instanceof KvU64 ? value : new KvU64(BigInt(value))
     return this.mutate({ type: 'max', key, value: u64Value })
   }
 
-  min(key: Key, value: bigint | KvU64): Atomic {
+  min(key: Key, value: bigint | KvU64): AtomicOperation {
     const u64Value = value instanceof KvU64 ? value : new KvU64(BigInt(value))
     return this.mutate({ type: 'min', key, value: u64Value })
   }
