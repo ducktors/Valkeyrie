@@ -1,5 +1,11 @@
 # valkeyrie
 
+## 0.5.1
+
+### Patch Changes
+
+- 686914a: named import for bson functions
+
 ## 0.5.0
 
 ### Minor Changes
