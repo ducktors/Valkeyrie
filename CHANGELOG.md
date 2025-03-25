@@ -1,5 +1,11 @@
 # valkeyrie
 
+## 0.5.0
+
+### Minor Changes
+
+- e5699d6: Implements watch method and fixes broken transactions with multiple clients
+
 ## 0.4.1
 
 ### Patch Changes
