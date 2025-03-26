@@ -180,24 +180,6 @@ describe('bson serializer', async () => {
     ])
   })
 
-  await dbTest('value size limit', async (db) => {
-    const lastValidValue = new Uint8Array(32769).toString().slice(1)
-    const firstInvalidValue = new Uint8Array(32769).toString()
-
-    const res = await db.set(['a'], lastValidValue)
-    assert.deepEqual(await db.get(['a']), {
-      key: ['a'],
-      value: lastValidValue,
-      versionstamp: res.versionstamp,
-    })
-
-    await assert.rejects(
-      async () => await db.set(['b'], firstInvalidValue),
-      TypeError,
-      'Value too large (max 65536 bytes)',
-    )
-  })
-
   await dbTest('operation size limit', async (db) => {
     const lastValidKeys: Key[] = new Array(10).fill(0).map((_, i) => ['a', i])
     const firstInvalidKeys: Key[] = new Array(11)

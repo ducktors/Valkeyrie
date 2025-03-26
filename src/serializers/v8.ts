@@ -15,9 +15,6 @@ export const v8Serializer = defineSerializer({
       isU64,
     } satisfies SerializedStruct)
 
-    if (serialized.length > 65536 + 26) {
-      throw new TypeError('Value too large (max 65536 bytes)')
-    }
     return serialized
   },
 
