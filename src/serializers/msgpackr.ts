@@ -25,10 +25,6 @@ export const msgpackrSerializer = defineSerializer({
       value: isU64 ? (value as KvU64).value : value,
       isU64,
     } satisfies SerializedStruct)
-    if (serialized.length > 65536 + 24) {
-      throw new TypeError('Value too large (max 65536 bytes)')
-    }
-
     return serialized
   },
 

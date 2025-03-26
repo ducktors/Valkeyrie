@@ -22,11 +22,6 @@ export const jsonSerializer = defineSerializer({
       'utf8',
     )
 
-    // 65536 + 21 = 65557
-    if (serialized.length > 65557) {
-      throw new TypeError('Value too large (max 65536 bytes)')
-    }
-
     return serialized
   },
 

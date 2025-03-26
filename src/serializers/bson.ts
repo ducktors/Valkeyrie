@@ -27,11 +27,6 @@ export const bsonSerializer = defineSerializer({
       }
       const serialized = serialize(wrappedValue)
 
-      // 65536 + 40 bytes for the wrapper object + bson overhead
-      if (serialized.length > 65576) {
-        throw new TypeError('Value too large (max 65536 bytes)')
-      }
-
       return serialized
     } catch (error) {
       if (error instanceof Error) {

@@ -1054,11 +1054,6 @@ export const myCustomSerializer = defineSerializer({
       'utf8',
     )
     
-    // Check size limits
-    if (serialized.length > 65536 + 21) {
-      throw new TypeError('Value too large (max 65536 bytes)')
-    }
-    
     return serialized
   },
 
