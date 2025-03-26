@@ -1,5 +1,11 @@
 # valkeyrie
 
+## 0.6.0
+
+### Minor Changes
+
+- d4f4d5d: remove size limits for values
+
 ## 0.5.1
 
 ### Patch Changes
