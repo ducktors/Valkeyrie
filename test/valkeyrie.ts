@@ -1,6 +1,6 @@
 import assert, { AssertionError } from 'node:assert'
 import { randomUUID } from 'node:crypto'
-import { unlink } from 'node:fs/promises'
+import { access, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
@@ -1838,5 +1838,53 @@ describe('test valkeyrie', async () => {
       Error,
       'database is not open',
     )
+  })
+
+  await test('destroy clears the db for in-memory db', async () => {
+    const db = await Valkeyrie.open(':memory:')
+    await db.destroy()
+    assert.strictEqual((await db.get(['a'])).value, null)
+  })
+
+  await test('destroy deletes the file for persistent db', async () => {
+    const filename = join(tmpdir(), randomUUID())
+    const db = await Valkeyrie.open(filename)
+    assert.strictEqual(await access(filename), undefined)
+    await db.destroy()
+    await assert.rejects(() => access(filename), {
+      name: 'Error',
+      message: `ENOENT: no such file or directory, access '${filename}'`,
+    })
+  })
+
+  await test('clear removes all data', async () => {
+    const db = await Valkeyrie.open(':memory:')
+    await db.set(['a'], 1)
+    assert.strictEqual((await db.get(['a'])).value, 1)
+    await db.clear()
+    assert.strictEqual((await db.get(['a'])).value, null)
+  })
+
+  await test('clear removes all data and keeps the file for persistent db', async () => {
+    const filename = join(tmpdir(), randomUUID())
+    const db = await Valkeyrie.open(filename)
+    await db.set(['a'], 1)
+    assert.strictEqual((await db.get(['a'])).value, 1)
+    await db.clear()
+    assert.strictEqual((await db.get(['a'])).value, null)
+    assert.strictEqual(await access(filename), undefined)
+  })
+
+  await test('destroyOnClose option with persistent db', async () => {
+    const filename = join(tmpdir(), randomUUID())
+    {
+      await using db = await Valkeyrie.open(filename, { destroyOnClose: true })
+      await db.set(['a'], 1)
+      assert.strictEqual((await db.get(['a'])).value, 1)
+    }
+    await assert.rejects(() => access(filename), {
+      name: 'Error',
+      message: `ENOENT: no such file or directory, access '${filename}'`,
+    })
   })
 })
