@@ -1,5 +1,11 @@
 # valkeyrie
 
+## 0.7.0
+
+### Minor Changes
+
+- 7f3312d: Add destroy and clear methods
+
 ## 0.6.0
 
 ### Minor Changes
