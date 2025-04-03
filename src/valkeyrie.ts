@@ -112,10 +112,20 @@ export class Valkeyrie {
     this.#isClosed = true
   }
 
+  /**
+   * Destroys the database by removing the underlying database file.
+   * This operation cannot be undone and will result in permanent data loss.
+   * @returns A promise that resolves when the database has been destroyed
+   */
   public async destroy(): Promise<void> {
     await this.#driver.destroy()
   }
 
+  /**
+   * Clears all data from the database but keeps the database file.
+   * This operation cannot be undone and will result in permanent data loss.
+   * @returns A promise that resolves when the database has been cleared
+   */
   public async clear(): Promise<void> {
     await this.#driver.clear()
   }
