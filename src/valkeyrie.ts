@@ -576,9 +576,14 @@ export class Valkeyrie {
     reverse = false,
   ): { startHash: string; endHash: string } {
     if (cursor) {
+      // Attempt to decode the cursor to get the actual key part
+      const cursorValue = this.decodeCursorValue(cursor)
+      // Create a key hash from the cursor value
+      const cursorHash = this.hashKey([cursorValue])
+
       return reverse
-        ? { startHash: '', endHash: cursor }
-        : { startHash: `${cursor}\0`, endHash: '\uffff' }
+        ? { startHash: '', endHash: cursorHash }
+        : { startHash: `${cursorHash}\0`, endHash: '\uffff' }
     }
 
     return {

@@ -1887,4 +1887,197 @@ describe('test valkeyrie', async () => {
       message: `ENOENT: no such file or directory, access '${filename}'`,
     })
   })
+
+  await dbTest('list with invalid selector combinations', async (db) => {
+    await assert.rejects(
+      async () => {
+        await Array.fromAsync(
+          db.list({ prefix: ['a'], start: ['a', 'b'], end: ['a', 'c'] }),
+        )
+      },
+      {
+        name: 'TypeError',
+        message: 'Cannot specify prefix with both start and end keys',
+      },
+    )
+  })
+
+  await dbTest('atomic operation with empty key', async (db) => {
+    await assert.rejects(
+      async () => {
+        await db.atomic().set([], 'value').commit()
+      },
+      {
+        name: 'Error',
+        message: 'Key cannot be empty',
+      },
+    )
+  })
+
+  await dbTest('atomic operation with key size exceeding limit', async (db) => {
+    const longString = 'a'.repeat(82000) // exceeds 81920 byte limit
+
+    await assert.rejects(
+      async () => {
+        await db.atomic().set([longString], 'value').commit()
+      },
+      {
+        name: 'TypeError',
+        message: 'Total key size too large (max 81920 bytes)',
+      },
+    )
+  })
+
+  await dbTest('commitVersionstamp returns expected symbol', async (db) => {
+    const symbol = db.commitVersionstamp()
+    assert.strictEqual(typeof symbol, 'symbol', 'Should return a symbol')
+
+    const symbol2 = db.commitVersionstamp()
+    assert.strictEqual(
+      symbol,
+      symbol2,
+      'Should return the same symbol on multiple calls',
+    )
+  })
+
+  await dbTest('decodeKeyHash throws on invalid type marker', async (db) => {
+    // Create an invalid key hash with an unknown type marker (0x06)
+    const invalidKeyHash = Buffer.from([0x06, 0x01, 0x02, 0x00]).toString('hex')
+
+    await assert.rejects(
+      async () => {
+        // @ts-expect-error Accessing private method for testing
+        db.decodeKeyHash(invalidKeyHash)
+      },
+      {
+        name: 'Error',
+        message: /Invalid key hash: unknown type marker 0x6/,
+      },
+    )
+  })
+
+  await dbTest('get method with empty key', async (db) => {
+    await assert.rejects(
+      async () => {
+        await db.get([])
+      },
+      {
+        name: 'Error',
+        message: 'Key cannot be empty',
+      },
+    )
+  })
+
+  await dbTest('list prefix with mismatched start key', async (db) => {
+    await assert.rejects(
+      async () => {
+        // Using list with prefix and start key that doesn't share the prefix
+        // This should trigger validatePrefixKey's check at lines 444-450
+        const iterator = db.list({
+          prefix: ['users'],
+          start: ['products', 1], // Different prefix
+        })
+
+        // Force execution by iterating
+        for await (const _ of iterator) {
+          // This should not execute
+        }
+      },
+      {
+        name: 'TypeError',
+        message: 'Start key is not in the keyspace defined by prefix',
+      },
+    )
+  })
+
+  await dbTest('list with empty prefix and cursor', async (db) => {
+    // Set up test data with different top-level keys
+    await db.set(['a'], 'value-a')
+    await db.set(['b'], 'value-b')
+    await db.set(['c'], 'value-c')
+    await db.set(['d'], 'value-d')
+    await db.set(['e'], 'value-e')
+
+    // First, make sure we can retrieve all entries without a cursor
+    const allEntries = await Array.fromAsync(db.list({ prefix: [] }))
+    assert.strictEqual(
+      allEntries.length,
+      5,
+      'Should retrieve all 5 entries with no cursor',
+    )
+
+    // Test forward direction with limit to get a valid cursor
+    const firstBatchIterator = db.list({ prefix: [] }, { limit: 2 })
+    const firstBatch = await Array.fromAsync(firstBatchIterator)
+    assert.strictEqual(firstBatch.length, 2)
+    const [first, second] = firstBatch
+    assert.deepEqual(first?.key, ['a'])
+    assert.deepEqual(second?.key, ['b'])
+
+    // Get the cursor from the first iterator and log it
+    const cursor = firstBatchIterator.cursor
+    assert.ok(cursor, 'Should have a valid cursor')
+
+    // Use the cursor to get the remaining entries
+    const secondBatchIterator = db.list({ prefix: [] }, { cursor })
+    const secondBatch = await Array.fromAsync(secondBatchIterator)
+
+    assert.strictEqual(
+      secondBatch.length,
+      3,
+      'Should retrieve 3 remaining entries',
+    )
+  })
+
+  await dbTest('list reversewith empty prefix and cursor', async (db) => {
+    // Set up test data with different top-level keys
+    await db.set(['a'], 'value-a')
+    await db.set(['b'], 'value-b')
+    await db.set(['c'], 'value-c')
+    await db.set(['d'], 'value-d')
+    await db.set(['e'], 'value-e')
+
+    // First, make sure we can retrieve all entries without a cursor
+    const allEntries = await Array.fromAsync(
+      db.list({ prefix: [] }, { reverse: true }),
+    )
+    assert.strictEqual(
+      allEntries.length,
+      5,
+      'Should retrieve all 5 entries with no cursor',
+    )
+
+    // Test forward direction with limit to get a valid cursor
+    const firstBatchIterator = db.list(
+      { prefix: [] },
+      { limit: 2, reverse: true },
+    )
+    const firstBatch = await Array.fromAsync(firstBatchIterator)
+    assert.strictEqual(firstBatch.length, 2)
+    const [first, second] = firstBatch
+    assert.deepEqual(first?.key, ['e'])
+    assert.deepEqual(second?.key, ['d'])
+
+    // Get the cursor from the first iterator and log it
+    const cursor = firstBatchIterator.cursor
+    assert.ok(cursor, 'Should have a valid cursor')
+
+    // Use the cursor to get the remaining entries
+    const secondBatchIterator = db.list(
+      { prefix: [] },
+      { cursor, reverse: true },
+    )
+    const secondBatch = await Array.fromAsync(secondBatchIterator)
+
+    const [third, fourth, fifth] = secondBatch
+    assert.deepEqual(third?.key, ['c'])
+    assert.deepEqual(fourth?.key, ['b'])
+    assert.deepEqual(fifth?.key, ['a'])
+
+    assert.strictEqual(
+      secondBatch.length,
+      3,
+      'Should retrieve 3 remaining entries',
+    )
+  })
 })
