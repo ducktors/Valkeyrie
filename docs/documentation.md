@@ -6,6 +6,7 @@
 - [Basic Usage](#basic-usage)
   - [Opening a Database](#opening-a-database)
   - [Closing a Database](#closing-a-database)
+  - [Database Management](#database-management)
   - [Setting Values](#setting-values)
   - [Getting Values](#getting-values)
   - [Deleting Values](#deleting-values)
@@ -84,6 +85,33 @@ Always close the database when you're done with it to release resources:
 
 ```typescript
 await db.close();
+```
+
+### Database Management
+
+Valkeyrie provides methods to manage the database beyond simple opening and closing:
+
+```typescript
+// Clear all data from the database
+await db.clear();
+
+// Destroy the database (deletes the database file)
+await db.destroy();
+```
+
+You can also set up automatic destruction of the database file when closing:
+
+```typescript
+// Open a database with destroyOnClose option
+const tempDb = await Valkeyrie.open('/path/to/temp.db', { destroyOnClose: true });
+
+// When you close this database, it will automatically be destroyed
+await tempDb.close();
+
+// Or you can use await using
+{
+  await using tempDb2 = await Valkeyrie.open('/path/to/temp.db', { destroyOnClose: true });
+}
 ```
 
 ### Setting Values
@@ -1252,6 +1280,10 @@ const db = await Valkeyrie.open('./data/custom.db', {
 
 - `async close(): Promise<void>`
   - Closes the database connection
+- `async destroy(): Promise<void>`
+  - Destroys the database (deletes the database file)
+- `async clear(): Promise<void>`
+  - Removes all data from the database
 - `async get<T = unknown>(key: Key): Promise<EntryMaybe<T>>`
   - Retrieves a value by key
 - `async getMany(keys: Key[]): Promise<EntryMaybe[]>`

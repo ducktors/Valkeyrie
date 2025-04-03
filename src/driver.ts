@@ -2,6 +2,8 @@ import type { Serializer } from './serializers/serializer.js'
 
 export interface Driver {
   close: () => Promise<void>
+  destroy: () => Promise<void>
+  clear: () => Promise<void>
   get: (keyHash: string, now: number) => Promise<DriverValue | undefined>
   set: (
     keyHash: string,

@@ -80,6 +80,12 @@ await db.atomic()
   .sum(['counters', 'visitors'], 1n)
   .commit();
 
+// Database management
+// Clear all data but keep the database file
+await db.clear();
+// Or completely destroy the database (deletes the file)
+// await db.destroy();
+
 // Close the database when done
 await db.close();
 ```

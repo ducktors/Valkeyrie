@@ -1,3 +1,4 @@
+import { unlink } from 'node:fs/promises'
 import { DatabaseSync } from 'node:sqlite'
 import { setTimeout } from 'node:timers/promises'
 import { type DriverValue, defineDriver } from './driver.js'
@@ -19,8 +20,10 @@ interface SqliteError extends Error {
   message: string
 }
 
+const MEMORY_PATH = ':memory:'
+
 export const sqliteDriver = defineDriver(
-  async (path = ':memory:', customSerializer?: () => Serializer) => {
+  async (path = MEMORY_PATH, customSerializer?: () => Serializer) => {
     const db = new DatabaseSync(path)
 
     db.exec(`
@@ -63,6 +66,7 @@ export const sqliteDriver = defineDriver(
         'SELECT key_hash, value, versionstamp FROM kv_store WHERE key_hash >= ? AND key_hash < ? AND key_hash != ? AND (expires_at IS NULL OR expires_at > ?) ORDER BY key_hash DESC LIMIT ?',
       ),
       cleanup: db.prepare('DELETE FROM kv_store WHERE expires_at <= ?'),
+      clear: db.prepare('DELETE FROM kv_store'),
     }
 
     // Use the provided serializer or default to v8Serializer
@@ -143,6 +147,22 @@ export const sqliteDriver = defineDriver(
         watchQueue.length = 0
         db.close()
       },
+      destroy: async () => {
+        if (path !== MEMORY_PATH) {
+          await Promise.all([
+            unlink(path).catch(() => {}),
+            unlink(`${path}-shm`).catch(() => {}),
+            unlink(`${path}-wal`).catch(() => {}),
+          ])
+        } else {
+          statements.clear.run()
+          await notifyWatchers()
+        }
+      },
+      clear: async () => {
+        statements.clear.run()
+        await notifyWatchers()
+      },
       get: async (keyHash: string, now: number) => {
         const result = statements.get.get(keyHash, now) as SqlRow | undefined
         if (!result) {
@@ -220,7 +240,7 @@ export const sqliteDriver = defineDriver(
                   sqliteError?.code === 'SQLITE_BUSY' ||
                   sqliteError?.message?.includes('database is locked')
                 ) {
-                  // Random backoff between 5-20ms, similar to Deno KV
+                  // Random backoff between 5-20ms
                   const backoff = 5 + Math.random() * 15
 
                   await setTimeout(backoff)

@@ -61,14 +61,19 @@ export class Valkeyrie {
   #driver: Driver
   #lastVersionstamp: bigint
   #isClosed = false
-
-  private constructor(functions: Driver, symbol?: symbol) {
+  #destroyOnClose = false
+  private constructor(
+    functions: Driver,
+    options: { destroyOnClose: boolean },
+    symbol?: symbol,
+  ) {
     if (valkeyrieSymbol !== symbol) {
       throw new TypeError(
         'Valkeyrie can not be constructed: use Valkeyrie.open() to create a new instance',
       )
     }
     this.#driver = functions
+    this.#destroyOnClose = options.destroyOnClose
     this.#lastVersionstamp = 0n
   }
 
@@ -86,10 +91,13 @@ export class Valkeyrie {
     path?: string,
     options: {
       serializer?: () => Serializer
+      destroyOnClose?: boolean
     } = {},
   ): Promise<Valkeyrie> {
+    const destroyOnClose = options.destroyOnClose ?? false
     const db = new Valkeyrie(
       await sqliteDriver(path, options.serializer),
+      { destroyOnClose },
       valkeyrieSymbol,
     )
     await db.cleanup()
@@ -97,8 +105,29 @@ export class Valkeyrie {
   }
 
   public async close(): Promise<void> {
+    if (this.#destroyOnClose) {
+      await this.destroy()
+    }
     await this.#driver.close()
     this.#isClosed = true
+  }
+
+  /**
+   * Destroys the database by removing the underlying database file.
+   * This operation cannot be undone and will result in permanent data loss.
+   * @returns A promise that resolves when the database has been destroyed
+   */
+  public async destroy(): Promise<void> {
+    await this.#driver.destroy()
+  }
+
+  /**
+   * Clears all data from the database but keeps the database file.
+   * This operation cannot be undone and will result in permanent data loss.
+   * @returns A promise that resolves when the database has been cleared
+   */
+  public async clear(): Promise<void> {
+    await this.#driver.clear()
   }
 
   /**
@@ -369,13 +398,13 @@ export class Valkeyrie {
     }
   }
 
-  public async getMany(keys: Key[]): Promise<EntryMaybe[]> {
+  public async getMany<T = unknown>(keys: Key[]): Promise<EntryMaybe<T>[]> {
     this.throwIfClosed()
     this.validateKeys(keys)
     if (keys.length > 10) {
       throw new TypeError('Too many ranges (max 10)')
     }
-    return Promise.all(keys.map((key) => this.get(key)))
+    return Promise.all(keys.map((key) => this.get<T>(key)))
   }
 
   public async set<T = unknown>(
@@ -440,7 +469,7 @@ export class Valkeyrie {
       batchSize: number
       reverse: boolean
     },
-  ): AsyncIterableIterator<Entry<T>> {
+  ): AsyncIterableIterator<Entry<T>, void> {
     const { limit, batchSize, reverse } = options
     if (batchSize > 1000) {
       throw new TypeError('Too many entries (max 1000)')
@@ -557,9 +586,14 @@ export class Valkeyrie {
     reverse = false,
   ): { startHash: string; endHash: string } {
     if (cursor) {
+      // Attempt to decode the cursor to get the actual key part
+      const cursorValue = this.decodeCursorValue(cursor)
+      // Create a key hash from the cursor value
+      const cursorHash = this.hashKey([cursorValue])
+
       return reverse
-        ? { startHash: '', endHash: cursor }
-        : { startHash: `${cursor}\0`, endHash: '\uffff' }
+        ? { startHash: '', endHash: cursorHash }
+        : { startHash: `${cursorHash}\0`, endHash: '\uffff' }
     }
 
     return {
@@ -651,7 +685,7 @@ export class Valkeyrie {
   public list<T = unknown>(
     selector: ListSelector,
     options: ListOptions = {},
-  ): AsyncIterableIterator<Entry<T>> & {
+  ): AsyncIterableIterator<Entry<T>, void> & {
     readonly cursor: string
     [Symbol.asyncDispose](): Promise<void>
   } {
