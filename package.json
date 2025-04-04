@@ -1,6 +1,6 @@
 {
   "name": "valkeyrie",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "type": "module",
   "main": "dist/cjs/valkeyrie.js",
   "module": "dist/esm/valkeyrie.js",
