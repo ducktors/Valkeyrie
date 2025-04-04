@@ -1,5 +1,11 @@
 # valkeyrie
 
+## 0.7.1
+
+### Patch Changes
+
+- e53697e: adds more tests
+
 ## 0.7.0
 
 ### Minor Changes
