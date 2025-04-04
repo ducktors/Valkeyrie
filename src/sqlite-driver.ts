@@ -149,10 +149,10 @@ export const sqliteDriver = defineDriver(
       },
       destroy: async () => {
         if (path !== MEMORY_PATH) {
-          await Promise.all([
-            unlink(path).catch(() => {}),
-            unlink(`${path}-shm`).catch(() => {}),
-            unlink(`${path}-wal`).catch(() => {}),
+          await Promise.allSettled([
+            unlink(path),
+            unlink(`${path}-shm`),
+            unlink(`${path}-wal`),
           ])
         } else {
           statements.clear.run()

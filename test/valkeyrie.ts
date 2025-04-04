@@ -1903,24 +1903,17 @@ describe('test valkeyrie', async () => {
   })
 
   await dbTest('atomic operation with empty key', async (db) => {
-    await assert.rejects(
-      async () => {
-        await db.atomic().set([], 'value').commit()
-      },
-      {
-        name: 'Error',
-        message: 'Key cannot be empty',
-      },
-    )
+    await assert.rejects(async () => db.atomic().set([], 'value').commit(), {
+      name: 'Error',
+      message: 'Key cannot be empty',
+    })
   })
 
   await dbTest('atomic operation with key size exceeding limit', async (db) => {
     const longString = 'a'.repeat(82000) // exceeds 81920 byte limit
 
     await assert.rejects(
-      async () => {
-        await db.atomic().set([longString], 'value').commit()
-      },
+      async () => db.atomic().set([longString], 'value').commit(),
       {
         name: 'TypeError',
         message: 'Total key size too large (max 81920 bytes)',
@@ -1944,11 +1937,10 @@ describe('test valkeyrie', async () => {
     // Create an invalid key hash with an unknown type marker (0x06)
     const invalidKeyHash = Buffer.from([0x06, 0x01, 0x02, 0x00]).toString('hex')
 
-    await assert.rejects(
-      async () => {
+    assert.throws(
+      () =>
         // @ts-expect-error Accessing private method for testing
-        db.decodeKeyHash(invalidKeyHash)
-      },
+        db.decodeKeyHash(invalidKeyHash),
       {
         name: 'Error',
         message: /Invalid key hash: unknown type marker 0x6/,
@@ -1957,15 +1949,10 @@ describe('test valkeyrie', async () => {
   })
 
   await dbTest('get method with empty key', async (db) => {
-    await assert.rejects(
-      async () => {
-        await db.get([])
-      },
-      {
-        name: 'Error',
-        message: 'Key cannot be empty',
-      },
-    )
+    await assert.rejects(async () => db.get([]), {
+      name: 'Error',
+      message: 'Key cannot be empty',
+    })
   })
 
   await dbTest('list prefix with mismatched start key', async (db) => {
@@ -2029,7 +2016,7 @@ describe('test valkeyrie', async () => {
     )
   })
 
-  await dbTest('list reversewith empty prefix and cursor', async (db) => {
+  await dbTest('list reverse with empty prefix and cursor', async (db) => {
     // Set up test data with different top-level keys
     await db.set(['a'], 'value-a')
     await db.set(['b'], 'value-b')
@@ -2078,6 +2065,74 @@ describe('test valkeyrie', async () => {
       secondBatch.length,
       3,
       'Should retrieve 3 remaining entries',
+    )
+  })
+
+  await dbTest('list with invalid selector', async (db) => {
+    const invalidSelector = {} as Record<string, never>
+
+    await assert.rejects(
+      async () => {
+        // @ts-expect-error - Intentionally passing an invalid selector for testing
+        for await (const _ of db.list(invalidSelector)) {
+        }
+      },
+      {
+        name: 'TypeError',
+        message:
+          'Invalid selector: must specify either prefix or start/end range',
+      },
+    )
+  })
+
+  await dbTest(
+    'watch method with empty keys array throws error',
+    async (db) => {
+      assert.throws(() => db.watch([]), {
+        name: 'Error',
+        message: 'Keys cannot be empty',
+      })
+    },
+  )
+
+  await dbTest('validateVersionstamp rejects non-string values', async (db) => {
+    await assert.rejects(
+      async () =>
+        db
+          .atomic()
+          // @ts-expect-error - Intentionally passing an invalid versionstamp type for testing
+          .check({ key: ['a'], versionstamp: 123 })
+          .commit(),
+      {
+        name: 'TypeError',
+        message: 'Versionstamp must be a string or null',
+      },
+    )
+
+    await assert.rejects(
+      async () =>
+        db
+          .atomic()
+          // @ts-expect-error - Intentionally passing an invalid versionstamp type for testing
+          .check({ key: ['a'], versionstamp: true })
+          .commit(),
+      {
+        name: 'TypeError',
+        message: 'Versionstamp must be a string or null',
+      },
+    )
+
+    await assert.rejects(
+      async () =>
+        db
+          .atomic()
+          // @ts-expect-error - Intentionally passing an invalid versionstamp type for testing
+          .check({ key: ['a'], versionstamp: {} })
+          .commit(),
+      {
+        name: 'TypeError',
+        message: 'Versionstamp must be a string or null',
+      },
     )
   })
 })

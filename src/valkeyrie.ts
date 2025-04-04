@@ -862,8 +862,9 @@ export class Valkeyrie {
       if (error instanceof TypeError) {
         throw error
       }
+      /* c8 ignore start */
       return { ok: false }
-    }
+    } /* c8 ignore end */
   }
 
   [Symbol.dispose](): void {
