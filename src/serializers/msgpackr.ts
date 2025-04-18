@@ -1,6 +1,10 @@
 import { Packr } from 'msgpackr'
 import { KvU64 } from '../kv-u64.js'
-import { type SerializedStruct, defineSerializer } from './serializer.js'
+import {
+  type SerializedStruct,
+  type Serializer,
+  defineSerializer,
+} from './serializer.js'
 
 const packr = new Packr({ moreTypes: true })
 
@@ -17,7 +21,7 @@ const packr = new Packr({ moreTypes: true })
  * - Map and Set objects
  * - BigInt values
  */
-export const msgpackrSerializer = defineSerializer({
+export const msgpackrSerializer: () => Serializer = defineSerializer({
   serialize: (value: unknown): Uint8Array => {
     const isU64 = value instanceof KvU64 ? 1 : 0
 

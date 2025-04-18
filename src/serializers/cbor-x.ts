@@ -1,6 +1,10 @@
 import { decode, encode } from 'cbor-x'
 import { KvU64 } from '../kv-u64.js'
-import { type SerializedStruct, defineSerializer } from './serializer.js'
+import {
+  type SerializedStruct,
+  type Serializer,
+  defineSerializer,
+} from './serializer.js'
 
 /**
  * CBOR-X serializer implementation using cbor-x
@@ -15,7 +19,7 @@ import { type SerializedStruct, defineSerializer } from './serializer.js'
  * - Map and Set objects
  * - BigInt values
  */
-export const cborXSerializer = defineSerializer({
+export const cborXSerializer: () => Serializer = defineSerializer({
   serialize: (value: unknown): Uint8Array => {
     const isU64 = value instanceof KvU64 ? 1 : 0
 

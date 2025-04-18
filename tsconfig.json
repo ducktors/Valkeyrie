@@ -8,6 +8,7 @@
     "esModuleInterop": true,
     "moduleDetection": "force",
     "verbatimModuleSyntax": true,
+    "isolatedDeclarations": true,
     "erasableSyntaxOnly": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,

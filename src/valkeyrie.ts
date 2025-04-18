@@ -1,15 +1,34 @@
-import { serialize } from 'node:v8'
+import type { Mutation } from './atomic-operation.js'
+import type { Check } from './atomic-operation.js'
+import { AtomicOperation } from './atomic-operation.js'
 import type { Driver } from './driver.js'
+import { bufferToKey } from './keys/buffer-to-key.js'
+import { keyToBuffer } from './keys/key-to-buffer.js'
+import type { Key } from './keys/key.js'
+import { validateKeys } from './keys/validate-keys.js'
 import { KvU64 } from './kv-u64.js'
 import type { Serializer } from './serializers/serializer.js'
 import { sqliteDriver } from './sqlite-driver.js'
 
-export type KeyPart = Uint8Array | string | number | bigint | boolean | symbol
-export type Key = KeyPart[]
+let lastVersionstamp = 0n
+/**
+ * Generates a unique versionstamp for each operation.
+ * This method ensures that each versionstamp is monotonically increasing,
+ * even within the same microsecond, by using the current timestamp in microseconds
+ * and incrementing the last used versionstamp if it's not greater than the current timestamp.
+ * The generated versionstamp is a hexadecimal string representation of the BigInt value.
+ *
+ * @returns A string representing the generated versionstamp.
+ */
+function generateVersionstamp(): string {
+  // Get current timestamp in microseconds
+  const now = BigInt(Date.now()) * 1000n
 
-interface AtomicCheck {
-  key: Key
-  versionstamp: string | null
+  // Ensure monotonically increasing values even within the same microsecond
+  lastVersionstamp = lastVersionstamp < now ? now : lastVersionstamp + 1n
+
+  // Convert the BigInt to a hexadecimal string and pad it to 20 characters
+  return lastVersionstamp.toString(16).padStart(20, '0')
 }
 
 type ListSelector =
@@ -26,21 +45,9 @@ interface ListOptions {
   batchSize?: number
 }
 
-interface SetOptions {
+export interface SetOptions {
   expireIn?: number
 }
-export interface Check {
-  key: Key
-  versionstamp: string | null
-}
-
-export type Mutation<T = unknown> = { key: Key } & (
-  | { type: 'set'; value: T; expireIn?: number }
-  | { type: 'delete' }
-  | { type: 'sum'; value: KvU64 }
-  | { type: 'max'; value: KvU64 }
-  | { type: 'min'; value: KvU64 }
-)
 
 interface Entry<T = unknown> {
   key: Key
@@ -55,13 +62,17 @@ export type EntryMaybe<T = unknown> =
       versionstamp: null
     }
 
-const valkeyrieSymbol = Symbol('Valkeyrie')
-const commitVersionstampSymbol = Symbol('ValkeyrieCommitVersionstamp')
+const valkeyrieSymbol = Symbol('kValkeyrie')
+const commitVersionstampSymbol = Symbol('kValkeyrieCommitVersionstamp')
 export class Valkeyrie {
   #driver: Driver
-  #lastVersionstamp: bigint
   #isClosed = false
   #destroyOnClose = false
+
+  /**
+   * We don't want to allow users to construct their own Valkeyrie instances directly.
+   * This is an internal constructor that is used by the open() method. To ensure that is only called by the open() method, we check the private kValkeyrie symbol.
+   */
   private constructor(
     functions: Driver,
     options: { destroyOnClose: boolean },
@@ -74,11 +85,6 @@ export class Valkeyrie {
     }
     this.#driver = functions
     this.#destroyOnClose = options.destroyOnClose
-    this.#lastVersionstamp = 0n
-  }
-
-  commitVersionstamp(): symbol {
-    return commitVersionstampSymbol
   }
 
   /**
@@ -95,15 +101,22 @@ export class Valkeyrie {
     } = {},
   ): Promise<Valkeyrie> {
     const destroyOnClose = options.destroyOnClose ?? false
+
     const db = new Valkeyrie(
       await sqliteDriver(path, options.serializer),
       { destroyOnClose },
       valkeyrieSymbol,
     )
+
     await db.cleanup()
+
     return db
   }
 
+  /**
+   * Closes the Valkeyrie database instance.
+   * This method is automatically called when valkeyrie is used with '(await) using' keyword.
+   */
   public async close(): Promise<void> {
     if (this.#destroyOnClose) {
       await this.destroy()
@@ -113,16 +126,52 @@ export class Valkeyrie {
   }
 
   /**
-   * Destroys the database by removing the underlying database file.
-   * This operation cannot be undone and will result in permanent data loss.
-   * @returns A promise that resolves when the database has been destroyed
+   * This method is automatically called when valkeyrie is used with 'using' keyword.
+   * It ensures that the instance is automatically closed when it goes out of the declaration scope.
+   * It is recommended to use 'await using' instead of 'using' if error handling is needed.
+   * @example
+   * ```ts
+   * using db = await Valkeyrie.open('path/to/db.sqlite')
+   * ```
    */
-  public async destroy(): Promise<void> {
-    await this.#driver.destroy()
+  [Symbol.dispose](): void {
+    this.close().catch(() => {})
   }
 
   /**
-   * Clears all data from the database but keeps the database file.
+   * This method is automatically called when valkeyrie is used with 'await using' keywords.
+   * It ensures that the instance is automatically closed when it goes out of the declaration scope.
+   *
+   * @example
+   * ```ts
+   * await using db = await Valkeyrie.open('path/to/db.sqlite')
+   * ```
+   */
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.close()
+  }
+
+  private throwIfClosed(): void {
+    if (this.#isClosed) {
+      throw new Error('Database is closed')
+    }
+  }
+
+  /**
+   * Cleans up the database by removing expired entries.
+   */
+  public async cleanup(): Promise<void> {
+    this.throwIfClosed()
+    const now = Date.now()
+    this.#driver.cleanup(now)
+  }
+
+  commitVersionstamp(): symbol {
+    return commitVersionstampSymbol
+  }
+
+  /**
+   * Clears all data from the database but keeps the database itself.
    * This operation cannot be undone and will result in permanent data loss.
    * @returns A promise that resolves when the database has been cleared
    */
@@ -131,114 +180,12 @@ export class Valkeyrie {
   }
 
   /**
-   * Validates that the provided keys are arrays.
-   *
-   * @param keys - The keys to validate.
-   * @throws {TypeError} If any key is not an array.
+   * Destroys the database.
+   * This operation cannot be undone and will result in permanent data loss.
+   * @returns A promise that resolves when the database has been destroyed
    */
-
-  public validateKeys(keys: unknown[]): asserts keys is Key[] {
-    for (const key of keys) {
-      if (!Array.isArray(key)) {
-        throw new TypeError('Key must be an array')
-      }
-    }
-  }
-
-  /**
-   * Generates a unique versionstamp for each operation.
-   * This method ensures that each versionstamp is monotonically increasing,
-   * even within the same microsecond, by using the current timestamp in microseconds
-   * and incrementing the last used versionstamp if it's not greater than the current timestamp.
-   * The generated versionstamp is a hexadecimal string representation of the BigInt value.
-   *
-   * @returns A string representing the generated versionstamp.
-   */
-  private generateVersionstamp(): string {
-    // Get current timestamp in microseconds
-    const now = BigInt(Date.now()) * 1000n
-
-    // Ensure monotonically increasing values even within the same microsecond
-    this.#lastVersionstamp =
-      this.#lastVersionstamp < now ? now : this.#lastVersionstamp + 1n
-
-    // Convert the BigInt to a hexadecimal string and pad it to 20 characters
-    return this.#lastVersionstamp.toString(16).padStart(20, '0')
-  }
-
-  /**
-   * Generates a hash for a given key. This method is crucial for indexing and storing keys in the database.
-   * It converts each part of the key into a specific byte format based on its type, following Deno.KV's encoding format.
-   * The format for each type is as follows:
-   * - Uint8Array: 0x01 + bytes + 0x00
-   * - String: 0x02 + utf8 bytes + 0x00
-   * - BigInt: 0x03 + 8 bytes int64 + 0x00
-   * - Number: 0x04 + 8 bytes double + 0x00
-   * - Boolean: 0x05 + single byte + 0x00
-   *
-   * After converting each part, they are concatenated with a null byte delimiter to form the full key.
-   * This method ensures that keys are consistently formatted and can be reliably hashed for storage and retrieval.
-   * Note that key ordering is determined by a lexicographical comparison of their parts, with the first part being the most significant and the last part being the least significant. Additionally, key comparisons are case sensitive.
-   *
-   * @param {Key} key - The key to be hashed.
-   * @returns {Buffer} - The buffer representation of the hashed key.
-   */
-  private keyToBuffer(
-    key: Key,
-    operation: 'write' | 'read' = 'read',
-  ): Uint8Array {
-    const parts = key.map((part) => {
-      let bytes: Buffer
-
-      if (part instanceof Uint8Array) {
-        // Uint8Array format: 0x01 + bytes + 0x00
-        bytes = Buffer.alloc(part.length + 2)
-        bytes[0] = 0x01 // Uint8Array type marker
-        Buffer.from(part).copy(bytes, 1)
-        bytes[bytes.length - 1] = 0x00
-      } else if (typeof part === 'string') {
-        // String format: 0x02 + utf8 bytes + 0x00
-        const strBytes = Buffer.from(part, 'utf8')
-        bytes = Buffer.alloc(strBytes.length + 2)
-        bytes[0] = 0x02 // String type marker
-        strBytes.copy(bytes, 1)
-        bytes[bytes.length - 1] = 0x00
-      } else if (typeof part === 'bigint') {
-        // Bigint format: 0x03 + 8 bytes int64 + 0x00
-        bytes = Buffer.alloc(10)
-        bytes[0] = 0x03 // Bigint type marker
-        const hex = part.toString(16).padStart(16, '0')
-        Buffer.from(hex, 'hex').copy(bytes, 1)
-        bytes[bytes.length - 1] = 0x00
-      } else if (typeof part === 'number') {
-        // Number format: 0x04 + 8 bytes double + 0x00
-        bytes = Buffer.alloc(10)
-        bytes[0] = 0x04 // Number type marker
-        bytes.writeDoubleBE(part, 1)
-        bytes[bytes.length - 1] = 0x00
-      } else if (typeof part === 'boolean') {
-        // Boolean format: 0x05 + single byte + 0x00
-        bytes = Buffer.alloc(3)
-        bytes[0] = 0x05 // Boolean type marker
-        bytes[1] = part ? 1 : 0
-        bytes[bytes.length - 1] = 0x00
-      } else {
-        throw new Error(`Unsupported key part type: ${typeof part}`)
-      }
-
-      return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-    })
-
-    // Join all parts with a null byte delimiter
-    const fullKey = Buffer.concat([...parts])
-    if (fullKey.length > 2048) {
-      throw new TypeError(
-        `Key too large for ${operation} (max ${
-          operation === 'write' ? 2048 : 2049
-        } bytes)`,
-      )
-    }
-    return fullKey
+  public async destroy(): Promise<void> {
+    await this.#driver.destroy()
   }
 
   /**
@@ -247,22 +194,17 @@ export class Valkeyrie {
    * @param {Key} key - The key to hash.
    * @returns {string} - The hex string representation of the hashed key.
    */
-  private hashKey(key: Key, operation?: 'write' | 'read'): string {
-    return Buffer.from(this.keyToBuffer(key, operation)).toString('hex')
+  private encodeKey(key: Key, operation?: 'write' | 'read'): string {
+    const fullKey = keyToBuffer(key)
+    if (fullKey.length > 2048) {
+      throw new TypeError(
+        `Key too large for ${operation} (max ${
+          operation === 'write' ? 2048 : 2049
+        } bytes)`,
+      )
+    }
+    return fullKey.toString('hex')
   }
-
-  /**
-   * Hashes a key and returns a base64-encoded string.
-   *
-   * @param {Key} key - The key to get the cursor from.
-   * @returns {string} - The base64 string representation of the hashed key.
-   */
-  private getCursorFromKey(key: Key): string {
-    return Buffer.from(this.keyToBuffer(key))
-      .toString('base64')
-      .replace(/=+$/, '')
-  }
-
   /**
    * Decodes a base64-encoded key hash back into its original key parts.
    * This method reverses the encoding process performed by hashKey.
@@ -277,113 +219,28 @@ export class Valkeyrie {
    * @returns {Key} The decoded key parts array
    * @throws {Error} If the hash format is invalid or contains an unknown type marker
    */
-  private decodeKeyHash(hash: string): Key {
+  private decodeKey(hash: string): Key {
     const buffer = Buffer.from(hash, 'hex')
-    const parts: KeyPart[] = []
-    let pos = 0
+    return bufferToKey(buffer)
+  }
 
-    while (pos < buffer.length) {
-      const typeMarker = buffer[pos] as number
-      pos++
-
-      switch (typeMarker) {
-        case 0x01: {
-          // Uint8Array
-          let end = pos
-          // Find the terminator (0x00) that marks the end of the Uint8Array
-          // We need to scan for it rather than stopping at the first 0 value
-          // since the Uint8Array itself might contain zeros
-          while (end < buffer.length) {
-            // Check if this position is the terminator
-            if (buffer[end] === 0x00) {
-              const nextPos = end + 1
-              // Check if we're at the end of the buffer
-              if (nextPos >= buffer.length) {
-                break
-              }
-
-              // Check if the next byte is a valid type marker
-              const nextByte = buffer[nextPos]
-              if (
-                nextByte === 0x01 ||
-                nextByte === 0x02 ||
-                nextByte === 0x03 ||
-                nextByte === 0x04 ||
-                nextByte === 0x05
-              ) {
-                break
-              }
-            }
-            end++
-          }
-
-          if (end >= buffer.length)
-            throw new Error('Invalid key hash: unterminated Uint8Array')
-          const bytes = buffer.subarray(pos, end)
-          parts.push(new Uint8Array(bytes))
-          pos = end + 1
-          break
-        }
-        case 0x02: {
-          // String
-          let end = pos
-          while (end < buffer.length && buffer[end] !== 0x00) end++
-          if (end >= buffer.length)
-            throw new Error('Invalid key hash: unterminated String')
-          const str = buffer.subarray(pos, end).toString('utf8')
-          parts.push(str)
-          pos = end + 1
-          break
-        }
-        case 0x03: {
-          // BigInt
-          if (pos + 8 >= buffer.length)
-            throw new Error('Invalid key hash: BigInt too short')
-          if (buffer[pos + 8] !== 0x00)
-            throw new Error('Invalid key hash: BigInt not terminated')
-          const hex = buffer.subarray(pos, pos + 8).toString('hex')
-          parts.push(BigInt(`0x${hex}`))
-          pos += 9
-          break
-        }
-        case 0x04: {
-          // Number
-          if (pos + 8 >= buffer.length)
-            throw new Error('Invalid key hash: Number too short')
-          if (buffer[pos + 8] !== 0x00)
-            throw new Error('Invalid key hash: Number not terminated')
-          const num = buffer.readDoubleBE(pos)
-          parts.push(num)
-          pos += 9
-          break
-        }
-        case 0x05: {
-          // Boolean
-          if (pos >= buffer.length)
-            throw new Error('Invalid key hash: Boolean too short')
-          if (buffer[pos + 1] !== 0x00)
-            throw new Error('Invalid key hash: Boolean not terminated')
-          parts.push(buffer[pos] === 1)
-          pos += 2
-          break
-        }
-        default:
-          throw new Error(
-            `Invalid key hash: unknown type marker 0x${typeMarker.toString(16)}`,
-          )
-      }
-    }
-
-    return parts
+  /**
+   * Hashes a key and returns a base64-encoded string.
+   *
+   * @param {Key} key - The key to get the cursor from.
+   * @returns {string} - The base64 string representation of the hashed key.
+   */
+  private getCursorFromKey(key: Key): string {
+    return keyToBuffer(key).toString('base64').replace(/=+$/, '')
   }
 
   public async get<T = unknown>(key: Key): Promise<EntryMaybe<T>> {
     this.throwIfClosed()
-    this.validateKeys([key])
+    validateKeys([key])
     if (key.length === 0) {
       throw new Error('Key cannot be empty')
     }
-    const keyHash = this.hashKey(key, 'read')
+    const keyHash = this.encodeKey(key, 'read')
     const now = Date.now()
     const result = await this.#driver.get(keyHash, now)
 
@@ -392,7 +249,7 @@ export class Valkeyrie {
     }
 
     return {
-      key: this.decodeKeyHash(result.keyHash),
+      key: this.decodeKey(result.keyHash),
       value: result.value as T,
       versionstamp: result.versionstamp,
     }
@@ -400,7 +257,7 @@ export class Valkeyrie {
 
   public async getMany<T = unknown>(keys: Key[]): Promise<EntryMaybe<T>[]> {
     this.throwIfClosed()
-    this.validateKeys(keys)
+    validateKeys(keys)
     if (keys.length > 10) {
       throw new TypeError('Too many ranges (max 10)')
     }
@@ -413,12 +270,12 @@ export class Valkeyrie {
     options: SetOptions = {},
   ): Promise<{ ok: true; versionstamp: string }> {
     this.throwIfClosed()
-    this.validateKeys([key])
+    validateKeys([key])
     if (key.length === 0) {
       throw new Error('Key cannot be empty')
     }
-    const keyHash = this.hashKey(key, 'write')
-    const versionstamp = this.generateVersionstamp()
+    const keyHash = this.encodeKey(key, 'write')
+    const versionstamp = generateVersionstamp()
 
     await this.#driver.set(
       keyHash,
@@ -432,8 +289,8 @@ export class Valkeyrie {
 
   public async delete(key: Key): Promise<void> {
     this.throwIfClosed()
-    this.validateKeys([key])
-    const keyHash = this.hashKey(key)
+    validateKeys([key])
+    const keyHash = this.encodeKey(key)
     await this.#driver.delete(keyHash)
   }
 
@@ -460,69 +317,6 @@ export class Valkeyrie {
     }
   }
 
-  private async *listBatch<T>(
-    startHash: string,
-    endHash: string,
-    prefixHash: string,
-    options: {
-      limit: number
-      batchSize: number
-      reverse: boolean
-    },
-  ): AsyncIterableIterator<Entry<T>, void> {
-    const { limit, batchSize, reverse } = options
-    if (batchSize > 1000) {
-      throw new TypeError('Too many entries (max 1000)')
-    }
-    const now = Date.now()
-    let remainingLimit = limit
-    let currentStartHash = startHash
-    let currentEndHash = endHash
-
-    // Continue fetching as long as we have a limit remaining or limit is Infinity
-    while (remainingLimit > 0 || limit === Number.POSITIVE_INFINITY) {
-      // If limit is Infinity, use batchSize, otherwise use the minimum of batchSize and remainingLimit
-      const currentBatchSize =
-        limit === Number.POSITIVE_INFINITY
-          ? batchSize
-          : Math.min(batchSize, remainingLimit)
-      const results = await this.#driver.list(
-        currentStartHash,
-        currentEndHash,
-        prefixHash,
-        now,
-        currentBatchSize,
-        reverse,
-      )
-      if (results.length === 0) break
-
-      for (const result of results) {
-        yield {
-          key: this.decodeKeyHash(result.keyHash),
-          value: result.value as T,
-          versionstamp: result.versionstamp,
-        }
-      }
-
-      if (results.length < currentBatchSize) break
-
-      // Only decrement remainingLimit if it's not Infinity
-      if (limit !== Number.POSITIVE_INFINITY) {
-        remainingLimit -= results.length
-      }
-
-      // Update hash bounds for next batch
-      const lastResult = results[results.length - 1]
-      if (!lastResult) break
-      const lastKeyHash = lastResult.keyHash
-      if (reverse) {
-        currentEndHash = lastKeyHash
-      } else {
-        currentStartHash = `${lastKeyHash}\0` // Use next possible hash value
-      }
-    }
-  }
-
   private decodeCursorValue(cursor: string): string {
     const bytes = Buffer.from(cursor, 'base64')
     // Skip type marker (0x02) and get the value bytes (excluding terminator 0x00)
@@ -534,12 +328,12 @@ export class Valkeyrie {
     cursor?: string,
     reverse = false,
   ): { startHash: string; endHash: string } {
-    const prefixHash = this.hashKey(prefix)
+    const prefixHash = this.encodeKey(prefix)
 
     if (cursor) {
       const cursorValue = this.decodeCursorValue(cursor)
       const cursorKey = [...prefix, cursorValue]
-      const cursorHash = this.hashKey(cursorKey)
+      const cursorHash = this.encodeKey(cursorKey)
 
       return reverse
         ? { startHash: prefixHash, endHash: cursorHash }
@@ -559,8 +353,8 @@ export class Valkeyrie {
     reverse = false,
   ): { startHash: string; endHash: string } {
     // Compare start and end keys
-    const startHash = this.hashKey(start)
-    const endHash = this.hashKey(end)
+    const startHash = this.encodeKey(start)
+    const endHash = this.encodeKey(end)
     if (startHash > endHash) {
       throw new TypeError('Start key is greater than end key')
     }
@@ -571,7 +365,7 @@ export class Valkeyrie {
       // by taking all parts from the start key except the last one
       // and appending the cursor value
       const cursorKey = [...start.slice(0, -1), cursorValue]
-      const cursorHash = this.hashKey(cursorKey)
+      const cursorHash = this.encodeKey(cursorKey)
 
       return reverse
         ? { startHash, endHash: cursorHash }
@@ -589,7 +383,7 @@ export class Valkeyrie {
       // Attempt to decode the cursor to get the actual key part
       const cursorValue = this.decodeCursorValue(cursor)
       // Create a key hash from the cursor value
-      const cursorHash = this.hashKey([cursorValue])
+      const cursorHash = this.encodeKey([cursorValue])
 
       return reverse
         ? { startHash: '', endHash: cursorHash }
@@ -665,7 +459,7 @@ export class Valkeyrie {
       return { ...bounds, prefixHash: '' }
     }
 
-    const prefixHash = this.hashKey(prefix)
+    const prefixHash = this.encodeKey(prefix)
     const bounds = this.calculatePrefixBounds(prefix, cursor, reverse)
     return { ...bounds, prefixHash }
   }
@@ -677,7 +471,7 @@ export class Valkeyrie {
     cursor?: string,
     reverse = false,
   ): { startHash: string; endHash: string; prefixHash: string } {
-    const prefixHash = this.hashKey(prefix)
+    const prefixHash = this.encodeKey(prefix)
     const bounds = this.calculateRangeBounds(start, end, cursor, reverse)
     return { ...bounds, prefixHash }
   }
@@ -769,10 +563,67 @@ export class Valkeyrie {
     return wrapper
   }
 
-  public async cleanup(): Promise<void> {
-    this.throwIfClosed()
+  private async *listBatch<T>(
+    startHash: string,
+    endHash: string,
+    prefixHash: string,
+    options: {
+      limit: number
+      batchSize: number
+      reverse: boolean
+    },
+  ): AsyncIterableIterator<Entry<T>, void> {
+    const { limit, batchSize, reverse } = options
+    if (batchSize > 1000) {
+      throw new TypeError('Too many entries (max 1000)')
+    }
     const now = Date.now()
-    this.#driver.cleanup(now)
+    let remainingLimit = limit
+    let currentStartHash = startHash
+    let currentEndHash = endHash
+
+    // Continue fetching as long as we have a limit remaining or limit is Infinity
+    while (remainingLimit > 0 || limit === Number.POSITIVE_INFINITY) {
+      // If limit is Infinity, use batchSize, otherwise use the minimum of batchSize and remainingLimit
+      const currentBatchSize =
+        limit === Number.POSITIVE_INFINITY
+          ? batchSize
+          : Math.min(batchSize, remainingLimit)
+      const results = await this.#driver.list(
+        currentStartHash,
+        currentEndHash,
+        prefixHash,
+        now,
+        currentBatchSize,
+        reverse,
+      )
+      if (results.length === 0) break
+
+      for (const result of results) {
+        yield {
+          key: this.decodeKey(result.keyHash),
+          value: result.value as T,
+          versionstamp: result.versionstamp,
+        }
+      }
+
+      if (results.length < currentBatchSize) break
+
+      // Only decrement remainingLimit if it's not Infinity
+      if (limit !== Number.POSITIVE_INFINITY) {
+        remainingLimit -= results.length
+      }
+
+      // Update hash bounds for next batch
+      const lastResult = results[results.length - 1]
+      if (!lastResult) break
+      const lastKeyHash = lastResult.keyHash
+      if (reverse) {
+        currentEndHash = lastKeyHash
+      } else {
+        currentStartHash = `${lastKeyHash}\0` // Use next possible hash value
+      }
+    }
   }
 
   public atomic(): AtomicOperation {
@@ -785,7 +636,7 @@ export class Valkeyrie {
     mutations: Mutation[],
   ): Promise<{ ok: true; versionstamp: string } | { ok: false }> {
     this.throwIfClosed()
-    const versionstamp = this.generateVersionstamp()
+    const versionstamp = generateVersionstamp()
 
     try {
       return await this.#driver.withTransaction(async () => {
@@ -799,7 +650,7 @@ export class Valkeyrie {
 
         // Apply mutations - all using the same versionstamp
         for (const mutation of mutations) {
-          const keyHash = this.hashKey(mutation.key)
+          const keyHash = this.encodeKey(mutation.key)
 
           if (mutation.type === 'delete') {
             await this.#driver.delete(keyHash)
@@ -867,35 +718,21 @@ export class Valkeyrie {
     } /* c8 ignore end */
   }
 
-  [Symbol.dispose](): void {
-    this.close().catch(() => {})
-  }
-
-  async [Symbol.asyncDispose](): Promise<void> {
-    await this.close()
-  }
-
-  private throwIfClosed(): void {
-    if (this.#isClosed) {
-      throw new Error('Database is closed')
-    }
-  }
-
   public watch<T extends readonly unknown[]>(
     keys: Key[],
   ): ReadableStream<EntryMaybe<T[number]>[]> {
     this.throwIfClosed()
-    this.validateKeys(keys)
+    validateKeys(keys)
     if (keys.length === 0) {
       throw new Error('Keys cannot be empty')
     }
-    const keyHashes = keys.map((key) => this.hashKey(key))
+    const keyHashes = keys.map((key) => this.encodeKey(key))
     return this.#driver.watch(keyHashes).pipeThrough(
       new TransformStream({
         transform: (chunk, controller) => {
           controller.enqueue(
             chunk.map((entry) => ({
-              key: this.decodeKeyHash(entry.keyHash),
+              key: this.decodeKey(entry.keyHash),
               value: entry.value as T[number],
               versionstamp: entry.versionstamp as string,
             })),
@@ -903,148 +740,5 @@ export class Valkeyrie {
         },
       }),
     )
-  }
-}
-
-// Internal class - not exported
-export class AtomicOperation {
-  private checks: Check[] = []
-  private mutations: Mutation[] = []
-  private valkeyrie: Valkeyrie
-  private totalMutationSize = 0
-  private totalKeySize = 0
-
-  constructor(valkeyrie: Valkeyrie) {
-    this.valkeyrie = valkeyrie
-  }
-
-  private validateVersionstamp(versionstamp: string | null): void {
-    if (versionstamp === null) return
-    if (typeof versionstamp !== 'string') {
-      throw new TypeError('Versionstamp must be a string or null')
-    }
-    if (versionstamp.length !== 20) {
-      throw new TypeError('Versionstamp must be 20 characters long')
-    }
-    if (!/^[0-9a-f]{20}$/.test(versionstamp)) {
-      throw new TypeError('Versionstamp must be a hex string')
-    }
-  }
-
-  check(...checks: AtomicCheck[]): AtomicOperation {
-    for (const check of checks) {
-      if (this.checks.length >= 100) {
-        throw new TypeError('Too many checks (max 100)')
-      }
-      this.valkeyrie.validateKeys([check.key])
-      this.validateVersionstamp(check.versionstamp)
-      this.checks.push(check)
-    }
-    return this
-  }
-
-  mutate(...mutations: Mutation[]): AtomicOperation {
-    for (const mutation of mutations) {
-      if (this.mutations.length >= 1000) {
-        throw new TypeError('Too many mutations (max 1000)')
-      }
-      this.valkeyrie.validateKeys([mutation.key])
-      if (mutation.key.length === 0) {
-        throw new Error('Key cannot be empty')
-      }
-
-      const keySize = serialize(mutation.key).length
-      this.totalKeySize += keySize
-
-      // Track mutation size without validation
-      let mutationSize = keySize
-      if ('value' in mutation) {
-        if (
-          mutation.type === 'sum' ||
-          mutation.type === 'max' ||
-          mutation.type === 'min'
-        ) {
-          mutationSize += 8 // 64-bit integer size
-        } else {
-          mutationSize += serialize(mutation.value).length
-        }
-      }
-      this.totalMutationSize += mutationSize
-
-      // Validate mutation type and required fields
-      switch (mutation.type) {
-        case 'set':
-          if (!('value' in mutation)) {
-            throw new TypeError('Set mutation requires a value')
-          }
-          break
-        case 'delete':
-          if ('value' in mutation) {
-            throw new TypeError('Delete mutation cannot have a value')
-          }
-          break
-        case 'sum':
-          if (!('value' in mutation) || !(mutation.value instanceof KvU64)) {
-            throw new TypeError('Cannot sum KvU64 with Number')
-          }
-          break
-        case 'max':
-        case 'min':
-          if (!('value' in mutation) || !(mutation.value instanceof KvU64)) {
-            throw new TypeError(
-              `Failed to perform '${mutation.type}' mutation on a non-U64 operand`,
-            )
-          }
-          break
-        default:
-          throw new TypeError('Invalid mutation type')
-      }
-
-      this.mutations.push(mutation)
-    }
-    return this
-  }
-
-  set<T = unknown>(
-    key: Key,
-    value: T,
-    options: SetOptions = {},
-  ): AtomicOperation {
-    return this.mutate({
-      type: 'set',
-      key,
-      value,
-      ...(options.expireIn ? { expireIn: options.expireIn } : {}),
-    })
-  }
-
-  delete(key: Key): AtomicOperation {
-    return this.mutate({ type: 'delete', key })
-  }
-
-  sum(key: Key, value: bigint | KvU64): AtomicOperation {
-    const u64Value = value instanceof KvU64 ? value : new KvU64(BigInt(value))
-    return this.mutate({ type: 'sum', key, value: u64Value })
-  }
-
-  max(key: Key, value: bigint | KvU64): AtomicOperation {
-    const u64Value = value instanceof KvU64 ? value : new KvU64(BigInt(value))
-    return this.mutate({ type: 'max', key, value: u64Value })
-  }
-
-  min(key: Key, value: bigint | KvU64): AtomicOperation {
-    const u64Value = value instanceof KvU64 ? value : new KvU64(BigInt(value))
-    return this.mutate({ type: 'min', key, value: u64Value })
-  }
-
-  async commit(): Promise<{ ok: true; versionstamp: string } | { ok: false }> {
-    // Validate total sizes before executing the atomic operation
-    if (this.totalKeySize > 81920) {
-      throw new TypeError('Total key size too large (max 81920 bytes)')
-    }
-    if (this.totalMutationSize > 819200) {
-      throw new TypeError('Total mutation size too large (max 819200 bytes)')
-    }
-    return this.valkeyrie.executeAtomicOperation(this.checks, this.mutations)
   }
 }

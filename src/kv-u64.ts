@@ -25,8 +25,9 @@ export class KvU64 {
   toString(): string {
     return this.value.toString()
   }
-
-  [Symbol.for('nodejs.util.inspect.custom')](): string {
+}
+// biome-ignore lint/suspicious/noExplicitAny: --isolatedDeclarations doesn't support unique symbols and forces us to inject the prop on the prototype
+;(KvU64 as any).prototype[Symbol.for('nodejs.util.inspect.custom')] =
+  function () {
     return `[KvU64: ${this.value}n]`
   }
-}

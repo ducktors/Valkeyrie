@@ -12,26 +12,18 @@ interface CustomError extends Error {
   code?: string
 }
 
-const cleanup = async (path: string) =>
-  Promise.allSettled([
-    unlink(path),
-    unlink(`${path}-shm`),
-    unlink(`${path}-wal`),
-  ])
-
 describe('sqliteDriver', async () => {
   const TEST_DB_PATH = 'test-db.sqlite'
   let driver: Awaited<ReturnType<typeof sqliteDriver>>
 
   beforeEach(async () => {
     // Clean up any existing test database
-    await cleanup(TEST_DB_PATH)
     driver = await sqliteDriver(TEST_DB_PATH)
   })
 
   afterEach(async () => {
     await driver.close()
-    await cleanup(TEST_DB_PATH)
+    await driver.destroy()
   })
 
   await test('handles null results in watch streams', async () => {

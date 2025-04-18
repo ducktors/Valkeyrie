@@ -1,7 +1,7 @@
 import { unlink } from 'node:fs/promises'
 import { DatabaseSync } from 'node:sqlite'
 import { setTimeout } from 'node:timers/promises'
-import { type DriverValue, defineDriver } from './driver.js'
+import { type Driver, type DriverValue, defineDriver } from './driver.js'
 import type { Serializer } from './serializers/serializer.js'
 import { v8Serializer } from './serializers/v8.js'
 
@@ -22,7 +22,10 @@ interface SqliteError extends Error {
 
 const MEMORY_PATH = ':memory:'
 
-export const sqliteDriver = defineDriver(
+export const sqliteDriver: (
+  path?: string,
+  serializerInit?: () => Serializer,
+) => Promise<Driver> = defineDriver(
   async (path = MEMORY_PATH, customSerializer?: () => Serializer) => {
     const db = new DatabaseSync(path)
 

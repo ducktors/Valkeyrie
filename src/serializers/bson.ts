@@ -1,6 +1,10 @@
 import { deserialize, serialize } from 'bson'
 import { KvU64 } from '../kv-u64.js'
-import { type SerializedStruct, defineSerializer } from './serializer.js'
+import {
+  type SerializedStruct,
+  type Serializer,
+  defineSerializer,
+} from './serializer.js'
 
 /**
  * BSON serializer implementation
@@ -12,7 +16,7 @@ import { type SerializedStruct, defineSerializer } from './serializer.js'
  * - Special types: Date, RegExp, Binary data, ObjectId
  * - Extended types: Int32, Int64, Decimal128, Timestamp, etc.
  */
-export const bsonSerializer = defineSerializer({
+export const bsonSerializer: () => Serializer = defineSerializer({
   serialize: (value: unknown): Uint8Array => {
     throwUnsupportedType(value)
     try {

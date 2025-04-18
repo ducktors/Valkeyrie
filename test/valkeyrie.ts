@@ -6,14 +6,10 @@ import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { setTimeout } from 'node:timers/promises'
 import { inspect } from 'node:util'
+import { AtomicOperation, type Mutation } from '../src/atomic-operation.js'
+import type { Key } from '../src/keys/key.js'
 import { KvU64 } from '../src/kv-u64.js'
-import {
-  AtomicOperation,
-  type EntryMaybe,
-  type Key,
-  type Mutation,
-  Valkeyrie,
-} from '../src/valkeyrie.js'
+import { type EntryMaybe, Valkeyrie } from '../src/valkeyrie.js'
 
 describe('test valkeyrie', async () => {
   async function dbTest(
@@ -1682,17 +1678,19 @@ describe('test valkeyrie', async () => {
   })
 
   await test('Valkeyrie explicit resource management manual close', async () => {
-    using db = await Valkeyrie.open()
-    await db.close()
+    {
+      using db = await Valkeyrie.open()
+      await db.close()
 
-    await assert.rejects(() => db.get(['a']), {
-      name: 'Error',
-      message: 'Database is closed',
-    })
+      await assert.rejects(() => db.get(['a']), {
+        name: 'Error',
+        message: 'Database is closed',
+      })
+    }
     // calling [Symbol.dispose] after manual close is a no-op
   })
 
-  dbTest('key watch', async (db) => {
+  await dbTest('key watch', async (db) => {
     const changeHistory: EntryMaybe<number>[] = []
     const watcher: ReadableStream<EntryMaybe<number>[]> = db.watch<number[]>([
       ['key'],
@@ -1940,7 +1938,7 @@ describe('test valkeyrie', async () => {
     assert.throws(
       () =>
         // @ts-expect-error Accessing private method for testing
-        db.decodeKeyHash(invalidKeyHash),
+        db.decodeKey(invalidKeyHash),
       {
         name: 'Error',
         message: /Invalid key hash: unknown type marker 0x6/,

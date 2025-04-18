@@ -1,5 +1,9 @@
 import { KvU64 } from '../kv-u64.js'
-import { type SerializedStruct, defineSerializer } from './serializer.js'
+import {
+  type SerializedStruct,
+  type Serializer,
+  defineSerializer,
+} from './serializer.js'
 
 /**
  * JSON serializer implementation
@@ -10,7 +14,7 @@ import { type SerializedStruct, defineSerializer } from './serializer.js'
  * - Uint8Array and other binary data are base64 encoded
  * - Recursive objects are not supported and will throw an error
  */
-export const jsonSerializer = defineSerializer({
+export const jsonSerializer: () => Serializer = defineSerializer({
   serialize: (value: unknown): Uint8Array => {
     const isU64 = value instanceof KvU64 ? 1 : 0
 
