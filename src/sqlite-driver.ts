@@ -11,10 +11,6 @@ type SqlRow = Pick<DriverValue, 'versionstamp'> & {
   is_u64: number
 }
 
-// Global write queue to ensure atomic operations are serialized
-const writeQueue: Array<() => Promise<void>> = []
-let isProcessing = false
-
 interface SqliteError extends Error {
   code?: string
   message: string
@@ -29,6 +25,8 @@ export const sqliteDriver = defineDriver(
     db.exec(`
     PRAGMA synchronous = NORMAL;
     PRAGMA journal_mode = WAL;
+    PRAGMA busy_timeout = 5000;
+    PRAGMA foreign_keys = ON;
     `)
 
     // Create the KV table with versioning and expiry support
@@ -106,22 +104,6 @@ export const sqliteDriver = defineDriver(
           }),
         )
         watcher.controller.enqueue(results)
-      }
-    }
-
-    async function processWriteQueue() {
-      if (isProcessing || writeQueue.length === 0) return
-      isProcessing = true
-
-      try {
-        while (writeQueue.length > 0) {
-          const operation = writeQueue.shift()
-          if (operation) {
-            await operation()
-          }
-        }
-      } finally {
-        isProcessing = false
       }
     }
 
@@ -222,37 +204,60 @@ export const sqliteDriver = defineDriver(
         await notifyWatchers()
       },
       withTransaction: async <T>(callback: () => Promise<T>): Promise<T> => {
-        return new Promise((resolve, reject) => {
-          writeQueue.push(async () => {
-            while (true) {
-              try {
-                db.exec('BEGIN IMMEDIATE TRANSACTION')
-                const result = await callback()
-                db.exec('COMMIT')
-                await notifyWatchers()
-                resolve(result)
-                return
-              } catch (error: unknown) {
-                db.exec('ROLLBACK')
-                // Check if the error is a SQLite busy error
-                const sqliteError = error as SqliteError
-                if (
-                  sqliteError?.code === 'SQLITE_BUSY' ||
-                  sqliteError?.message?.includes('database is locked')
-                ) {
-                  // Random backoff between 5-20ms
-                  const backoff = 5 + Math.random() * 15
+        // Implement exponential backoff for lock contention
+        let attempt = 0
+        const maxAttempts = 10
+        const baseDelay = 5 // ms
 
-                  await setTimeout(backoff)
-                  continue
-                }
-                reject(error)
-                return
-              }
+        while (attempt < maxAttempts) {
+          try {
+            // Use IMMEDIATE transaction to acquire exclusive lock immediately
+            // This provides cross-process coordination
+            db.exec('BEGIN IMMEDIATE TRANSACTION')
+
+            try {
+              const result = await callback()
+              db.exec('COMMIT')
+              await notifyWatchers()
+              return result
+            } catch (callbackError) {
+              db.exec('ROLLBACK')
+              throw callbackError
             }
-          })
-          processWriteQueue()
-        })
+          } catch (error: unknown) {
+            const sqliteError = error as SqliteError
+
+            // Check if the error is a SQLite busy/locked error that should trigger retry
+            if (
+              sqliteError?.code === 'SQLITE_BUSY' ||
+              sqliteError?.code === 'SQLITE_LOCKED' ||
+              sqliteError?.code === 'SQLITE_BUSY_RECOVERY' ||
+              sqliteError?.code === 'SQLITE_BUSY_SNAPSHOT' ||
+              sqliteError?.message?.includes('database is locked') ||
+              sqliteError?.message?.includes('database is busy') ||
+              sqliteError?.message?.includes('database table is locked') ||
+              sqliteError?.message?.includes('SQLITE_BUSY')
+            ) {
+              attempt++
+
+              if (attempt >= maxAttempts) {
+                throw new Error(
+                  `Transaction failed after ${maxAttempts} attempts due to database contention`,
+                )
+              }
+
+              // Exponential backoff with jitter
+              const delay = baseDelay * 2 ** attempt + Math.random() * 5
+              await setTimeout(delay)
+              continue
+            }
+
+            // If it's not a lock contention error, throw immediately
+            throw error
+          }
+        }
+
+        throw new Error('Transaction failed: max attempts exceeded')
       },
       watch: (keyHashes: string[]) => {
         return new ReadableStream({

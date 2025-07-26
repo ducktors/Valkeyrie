@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { serialize } from 'node:v8'
 import type { Driver } from './driver.js'
 import { KvU64 } from './kv-u64.js'
@@ -60,6 +61,7 @@ const commitVersionstampSymbol = Symbol('ValkeyrieCommitVersionstamp')
 export class Valkeyrie {
   #driver: Driver
   #lastVersionstamp: bigint
+  #instanceId: string
   #isClosed = false
   #destroyOnClose = false
   private constructor(
@@ -75,6 +77,7 @@ export class Valkeyrie {
     this.#driver = functions
     this.#destroyOnClose = options.destroyOnClose
     this.#lastVersionstamp = 0n
+    this.#instanceId = randomUUID()
   }
 
   commitVersionstamp(): symbol {
@@ -146,11 +149,14 @@ export class Valkeyrie {
   }
 
   /**
-   * Generates a unique versionstamp for each operation.
-   * This method ensures that each versionstamp is monotonically increasing,
-   * even within the same microsecond, by using the current timestamp in microseconds
-   * and incrementing the last used versionstamp if it's not greater than the current timestamp.
-   * The generated versionstamp is a hexadecimal string representation of the BigInt value.
+   * Generates a unique versionstamp for each operation across all instances.
+   * This method ensures that each versionstamp is globally unique by combining:
+   * - Current timestamp in microseconds (for ordering)
+   * - Instance ID (for uniqueness across processes)
+   * - Monotonic counter (for uniqueness within same microsecond)
+   *
+   * Format: {timestamp_hex_16}{instance_id_hash_8}{counter_hex_4}
+   * Total length: 28 characters (16+8+4)
    *
    * @returns A string representing the generated versionstamp.
    */
@@ -162,8 +168,19 @@ export class Valkeyrie {
     this.#lastVersionstamp =
       this.#lastVersionstamp < now ? now : this.#lastVersionstamp + 1n
 
-    // Convert the BigInt to a hexadecimal string and pad it to 20 characters
-    return this.#lastVersionstamp.toString(16).padStart(20, '0')
+    // Create a short hash of the instance ID for space efficiency
+    const instanceHash = Buffer.from(this.#instanceId)
+      .toString('hex')
+      .slice(0, 8)
+
+    // Get counter portion (last 16 bits of the versionstamp)
+    const counter = Number(this.#lastVersionstamp & 0xffffn)
+
+    // Combine timestamp (16 chars) + instance hash (8 chars) + counter (4 chars)
+    const timestampHex = this.#lastVersionstamp.toString(16).padStart(16, '0')
+    const counterHex = counter.toString(16).padStart(4, '0')
+
+    return `${timestampHex}${instanceHash}${counterHex}`
   }
 
   /**
@@ -923,10 +940,11 @@ export class AtomicOperation {
     if (typeof versionstamp !== 'string') {
       throw new TypeError('Versionstamp must be a string or null')
     }
-    if (versionstamp.length !== 20) {
-      throw new TypeError('Versionstamp must be 20 characters long')
+    // Support both old format (20 chars) and new format (28 chars) for backward compatibility
+    if (versionstamp.length !== 20 && versionstamp.length !== 28) {
+      throw new TypeError('Versionstamp must be 20 or 28 characters long')
     }
-    if (!/^[0-9a-f]{20}$/.test(versionstamp)) {
+    if (!/^[0-9a-f]{20,28}$/.test(versionstamp)) {
       throw new TypeError('Versionstamp must be a hex string')
     }
   }
