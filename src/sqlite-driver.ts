@@ -16,6 +16,9 @@ interface SqliteError extends Error {
   message: string
 }
 
+// Process-local transaction mutex to prevent concurrent transactions within same process
+let transactionMutex: Promise<void> = Promise.resolve()
+
 const MEMORY_PATH = ':memory:'
 
 export const sqliteDriver = defineDriver(
@@ -204,60 +207,73 @@ export const sqliteDriver = defineDriver(
         await notifyWatchers()
       },
       withTransaction: async <T>(callback: () => Promise<T>): Promise<T> => {
-        // Implement exponential backoff for lock contention
-        let attempt = 0
-        const maxAttempts = 10
-        const baseDelay = 5 // ms
+        // Use process-level mutex to prevent concurrent transactions within same process
+        const currentMutex = transactionMutex
+        let resolveMutex: () => void
+        transactionMutex = new Promise((resolve) => {
+          resolveMutex = resolve
+        })
 
-        while (attempt < maxAttempts) {
-          try {
-            // Use IMMEDIATE transaction to acquire exclusive lock immediately
-            // This provides cross-process coordination
-            db.exec('BEGIN IMMEDIATE TRANSACTION')
+        try {
+          await currentMutex
 
+          // Implement exponential backoff for cross-process lock contention
+          let attempt = 0
+          const maxAttempts = 10
+          const baseDelay = 5 // ms
+
+          while (attempt < maxAttempts) {
             try {
-              const result = await callback()
-              db.exec('COMMIT')
-              await notifyWatchers()
-              return result
-            } catch (callbackError) {
-              db.exec('ROLLBACK')
-              throw callbackError
-            }
-          } catch (error: unknown) {
-            const sqliteError = error as SqliteError
+              // Use IMMEDIATE transaction to acquire exclusive lock immediately
+              // This provides cross-process coordination
+              db.exec('BEGIN IMMEDIATE TRANSACTION')
 
-            // Check if the error is a SQLite busy/locked error that should trigger retry
-            if (
-              sqliteError?.code === 'SQLITE_BUSY' ||
-              sqliteError?.code === 'SQLITE_LOCKED' ||
-              sqliteError?.code === 'SQLITE_BUSY_RECOVERY' ||
-              sqliteError?.code === 'SQLITE_BUSY_SNAPSHOT' ||
-              sqliteError?.message?.includes('database is locked') ||
-              sqliteError?.message?.includes('database is busy') ||
-              sqliteError?.message?.includes('database table is locked') ||
-              sqliteError?.message?.includes('SQLITE_BUSY')
-            ) {
-              attempt++
+              try {
+                const result = await callback()
+                db.exec('COMMIT')
+                await notifyWatchers()
+                return result
+              } catch (callbackError) {
+                db.exec('ROLLBACK')
+                throw callbackError
+              }
+            } catch (error: unknown) {
+              const sqliteError = error as SqliteError
 
-              if (attempt >= maxAttempts) {
-                throw new Error(
-                  `Transaction failed after ${maxAttempts} attempts due to database contention`,
-                )
+              // Check if the error is a SQLite busy/locked error that should trigger retry
+              if (
+                sqliteError?.code === 'SQLITE_BUSY' ||
+                sqliteError?.code === 'SQLITE_LOCKED' ||
+                sqliteError?.code === 'SQLITE_BUSY_RECOVERY' ||
+                sqliteError?.code === 'SQLITE_BUSY_SNAPSHOT' ||
+                sqliteError?.message?.includes('database is locked') ||
+                sqliteError?.message?.includes('database is busy') ||
+                sqliteError?.message?.includes('database table is locked') ||
+                sqliteError?.message?.includes('SQLITE_BUSY')
+              ) {
+                attempt++
+
+                if (attempt >= maxAttempts) {
+                  throw new Error(
+                    `Transaction failed after ${maxAttempts} attempts due to database contention`,
+                  )
+                }
+
+                // Exponential backoff with jitter for cross-process coordination
+                const delay = baseDelay * 2 ** attempt + Math.random() * 5
+                await setTimeout(delay)
+                continue
               }
 
-              // Exponential backoff with jitter
-              const delay = baseDelay * 2 ** attempt + Math.random() * 5
-              await setTimeout(delay)
-              continue
+              // If it's not a lock contention error, throw immediately
+              throw error
             }
-
-            // If it's not a lock contention error, throw immediately
-            throw error
           }
-        }
 
-        throw new Error('Transaction failed: max attempts exceeded')
+          throw new Error('Transaction failed: max attempts exceeded')
+        } finally {
+          resolveMutex()
+        }
       },
       watch: (keyHashes: string[]) => {
         return new ReadableStream({
