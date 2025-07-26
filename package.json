@@ -55,11 +55,7 @@
   },
   "author": "Maksim Sinik <maksim@sinik.it>",
   "license": "MIT",
-  "keywords": [
-    "kv-db",
-    "kv",
-    "keyvalue"
-  ],
+  "keywords": ["kv-db", "kv", "keyvalue"],
   "engines": {
     "node": ">=20"
   },
@@ -112,9 +108,7 @@
     "typescript": "^5.8.2",
     "validate-package-exports": "^0.8.0"
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "pnpm": {
     "onlyBuiltDependencies": [
       "@biomejs/biome",
