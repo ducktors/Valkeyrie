@@ -61,9 +61,9 @@ const commitVersionstampSymbol = Symbol('ValkeyrieCommitVersionstamp')
 export class Valkeyrie {
   #driver: Driver
   #lastVersionstamp: bigint
-  #instanceId: string
   #isClosed = false
   #destroyOnClose = false
+  #instanceId: string
   private constructor(
     functions: Driver,
     options: { destroyOnClose: boolean },
@@ -149,14 +149,11 @@ export class Valkeyrie {
   }
 
   /**
-   * Generates a unique versionstamp for each operation across all instances.
-   * This method ensures that each versionstamp is globally unique by combining:
-   * - Current timestamp in microseconds (for ordering)
-   * - Instance ID (for uniqueness across processes)
-   * - Monotonic counter (for uniqueness within same microsecond)
-   *
-   * Format: {timestamp_hex_16}{instance_id_hash_8}{counter_hex_4}
-   * Total length: 28 characters (16+8+4)
+   * Generates a unique versionstamp for each operation.
+   * This method ensures that each versionstamp is monotonically increasing,
+   * even within the same microsecond, by using the current timestamp in microseconds
+   * and incrementing the last used versionstamp if it's not greater than the current timestamp.
+   * The generated versionstamp is a hexadecimal string representation of the BigInt value.
    *
    * @returns A string representing the generated versionstamp.
    */
