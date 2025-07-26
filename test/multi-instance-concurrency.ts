@@ -215,12 +215,7 @@ describe('Multi-Instance Concurrency', async () => {
     for (let i = 0; i < numOperations; i++) {
       const instance = [instance1, instance2, instance3][i % 3]
 
-      operations.push(
-        instance
-          .atomic()
-          .set(key, i)
-          .commit(),
-      )
+      operations.push(instance.atomic().set(key, i).commit())
     }
 
     // Execute all operations concurrently
@@ -330,12 +325,7 @@ describe('Multi-Instance Concurrency', async () => {
       const instance = instances[i % numInstances]
 
       if (instance) {
-        operations.push(
-          instance
-            .atomic()
-            .set(key, `operation-${i}`)
-            .commit(),
-        )
+        operations.push(instance.atomic().set(key, `operation-${i}`).commit())
       }
     }
 

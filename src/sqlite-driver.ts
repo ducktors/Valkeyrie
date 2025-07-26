@@ -209,7 +209,7 @@ export const sqliteDriver = defineDriver(
       withTransaction: async <T>(callback: () => Promise<T>): Promise<T> => {
         // Use process-level mutex to prevent concurrent transactions within same process
         const currentMutex = transactionMutex
-        let resolveMutex: () => void
+        let resolveMutex: () => void = () => {}
         transactionMutex = new Promise((resolve) => {
           resolveMutex = resolve
         })
