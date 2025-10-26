@@ -21,6 +21,7 @@ export interface Driver {
     reverse?: boolean,
   ) => Promise<DriverValue[]>
   cleanup: (now: number) => Promise<void>
+  generateVersionstamp: () => Promise<string>
   withTransaction: <T>(callback: () => Promise<T>) => Promise<T>
   watch: (
     keyHashes: string[],

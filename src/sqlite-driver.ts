@@ -1,5 +1,5 @@
 import { unlink } from 'node:fs/promises'
-import { DatabaseSync } from 'node:sqlite'
+import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import { setTimeout } from 'node:timers/promises'
 import { type DriverValue, defineDriver } from './driver.js'
 import type { Serializer } from './serializers/serializer.js'
@@ -11,9 +11,71 @@ type SqlRow = Pick<DriverValue, 'versionstamp'> & {
   is_u64: number
 }
 
-// Global write queue to ensure atomic operations are serialized
-const writeQueue: Array<() => Promise<void>> = []
-let isProcessing = false
+// Helper function to generate database-level versionstamps
+async function generateVersionstamp(
+  db: DatabaseSync,
+  versionstampStatement: StatementSync,
+  transactionState: { inTransaction: boolean },
+): Promise<string> {
+  try {
+    const result = versionstampStatement.get() as { sequence: number }
+    const timestamp = BigInt(Date.now() * 1000) // microseconds
+    // Combine timestamp and sequence into a single 20-character hex string:
+    // - Shift timestamp left by 20 bits (makes room for sequence in lower bits)
+    // - Mask sequence to 20 bits (0xFFFFF = 1048575 max) to prevent overflow
+    // - OR them together: [timestamp bits][sequence bits]
+    // This ensures uniqueness (sequence) and ordering (timestamp prefix)
+    const combined = (timestamp << 20n) | BigInt(result.sequence & 0xfffff)
+    return combined.toString(16).padStart(20, '0')
+  } catch (error: unknown) {
+    // If we're outside a transaction and get a lock error, use a transaction with retry logic
+    const sqliteError = error as SqliteError
+    if (
+      sqliteError?.code === 'SQLITE_BUSY' ||
+      sqliteError?.message?.includes('database is locked')
+    ) {
+      // Retry logic similar to withTransaction
+      while (true) {
+        try {
+          db.exec('BEGIN IMMEDIATE TRANSACTION')
+          transactionState.inTransaction = true
+          const result = versionstampStatement.get() as {
+            sequence: number
+          }
+          db.exec('COMMIT')
+          transactionState.inTransaction = false
+          const timestamp = BigInt(Date.now() * 1000) // microseconds
+          // Same bit manipulation as above: combine timestamp and sequence
+          const combined =
+            (timestamp << 20n) | BigInt(result.sequence & 0xfffff)
+          return combined.toString(16).padStart(20, '0')
+        } catch (txError: unknown) {
+          try {
+            if (transactionState.inTransaction) {
+              db.exec('ROLLBACK')
+              transactionState.inTransaction = false
+            }
+          } catch (rollbackError) {
+            // Ignore rollback errors if transaction is already rolled back
+          }
+
+          const txSqliteError = txError as SqliteError
+          if (
+            txSqliteError?.code === 'SQLITE_BUSY' ||
+            txSqliteError?.message?.includes('database is locked')
+          ) {
+            // Random backoff between 5-20ms
+            const backoff = 5 + Math.random() * 15
+            await setTimeout(backoff)
+            continue
+          }
+          throw txError
+        }
+      }
+    }
+    throw error
+  }
+}
 
 interface SqliteError extends Error {
   code?: string
@@ -25,6 +87,7 @@ const MEMORY_PATH = ':memory:'
 export const sqliteDriver = defineDriver(
   async (path = MEMORY_PATH, customSerializer?: () => Serializer) => {
     const db = new DatabaseSync(path)
+    const transactionState = { inTransaction: false }
 
     db.exec(`
     PRAGMA synchronous = NORMAL;
@@ -46,6 +109,13 @@ export const sqliteDriver = defineDriver(
 
     CREATE INDEX IF NOT EXISTS idx_kv_store_key_hash
     ON kv_store(key_hash);
+
+    CREATE TABLE IF NOT EXISTS versionstamp_sequence (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      sequence INTEGER NOT NULL DEFAULT 0
+    );
+
+    INSERT OR IGNORE INTO versionstamp_sequence (id, sequence) VALUES (1, 0);
     `)
 
     const statements = {
@@ -67,6 +137,9 @@ export const sqliteDriver = defineDriver(
       ),
       cleanup: db.prepare('DELETE FROM kv_store WHERE expires_at <= ?'),
       clear: db.prepare('DELETE FROM kv_store'),
+      generateVersionstamp: db.prepare(
+        'UPDATE versionstamp_sequence SET sequence = sequence + 1 WHERE id = 1 RETURNING sequence',
+      ),
     }
 
     // Use the provided serializer or default to v8Serializer
@@ -106,22 +179,6 @@ export const sqliteDriver = defineDriver(
           }),
         )
         watcher.controller.enqueue(results)
-      }
-    }
-
-    async function processWriteQueue() {
-      if (isProcessing || writeQueue.length === 0) return
-      isProcessing = true
-
-      try {
-        while (writeQueue.length > 0) {
-          const operation = writeQueue.shift()
-          if (operation) {
-            await operation()
-          }
-        }
-      } finally {
-        isProcessing = false
       }
     }
 
@@ -221,38 +278,50 @@ export const sqliteDriver = defineDriver(
         statements.cleanup.run(now)
         await notifyWatchers()
       },
+      generateVersionstamp: () =>
+        generateVersionstamp(
+          db,
+          statements.generateVersionstamp,
+          transactionState,
+        ),
       withTransaction: async <T>(callback: () => Promise<T>): Promise<T> => {
-        return new Promise((resolve, reject) => {
-          writeQueue.push(async () => {
-            while (true) {
-              try {
-                db.exec('BEGIN IMMEDIATE TRANSACTION')
-                const result = await callback()
-                db.exec('COMMIT')
-                await notifyWatchers()
-                resolve(result)
-                return
-              } catch (error: unknown) {
-                db.exec('ROLLBACK')
-                // Check if the error is a SQLite busy error
-                const sqliteError = error as SqliteError
-                if (
-                  sqliteError?.code === 'SQLITE_BUSY' ||
-                  sqliteError?.message?.includes('database is locked')
-                ) {
-                  // Random backoff between 5-20ms
-                  const backoff = 5 + Math.random() * 15
+        if (transactionState.inTransaction) {
+          // If already in transaction, just run the callback
+          return await callback()
+        }
 
-                  await setTimeout(backoff)
-                  continue
-                }
-                reject(error)
-                return
+        while (true) {
+          try {
+            db.exec('BEGIN IMMEDIATE TRANSACTION')
+            transactionState.inTransaction = true
+            const result = await callback()
+            db.exec('COMMIT')
+            transactionState.inTransaction = false
+            await notifyWatchers()
+            return result
+          } catch (error: unknown) {
+            try {
+              if (transactionState.inTransaction) {
+                db.exec('ROLLBACK')
+                transactionState.inTransaction = false
               }
+            } catch (rollbackError) {
+              // Ignore rollback errors if transaction is already rolled back
             }
-          })
-          processWriteQueue()
-        })
+            // Check if the error is a SQLite busy error
+            const sqliteError = error as SqliteError
+            if (
+              sqliteError?.code === 'SQLITE_BUSY' ||
+              sqliteError?.message?.includes('database is locked')
+            ) {
+              // Random backoff between 5-20ms
+              const backoff = 5 + Math.random() * 15
+              await setTimeout(backoff)
+              continue
+            }
+            throw error
+          }
+        }
       },
       watch: (keyHashes: string[]) => {
         return new ReadableStream({
