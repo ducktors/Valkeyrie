@@ -13,7 +13,7 @@ permissions:
   issues: read
 
 env:
-  PNPM_VERSION: 10.6.2
+  PNPM_VERSION: 10.20.0
   NPM_CONFIG_PROVENANCE: true
 
 jobs:
@@ -61,8 +61,8 @@ jobs:
         with:
           publish: pnpm release
           createGithubReleases: true
-          commit: 'chore: version release'
-          title: 'Version Release'
+          commit: "chore: version release"
+          title: "Version Release"
         env:
           GITHUB_TOKEN: ${{ secrets.DUCKTORS_PAT }}
           NPM_TOKEN: ${{ secrets.DUCKTORS_NPM_TOKEN }}
