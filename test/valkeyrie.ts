@@ -2135,4 +2135,396 @@ describe('test valkeyrie', async () => {
       },
     )
   })
+
+  // Tests for from() and fromAsync() factory methods
+  await test('from() creates and populates database with array', async () => {
+    const users = [
+      { id: 1, name: 'Alice' },
+      { id: 2, name: 'Bob' },
+      { id: 3, name: 'Charlie' },
+    ]
+
+    const db = await Valkeyrie.from(users, {
+      prefix: ['users'],
+      keyProperty: 'id',
+    })
+
+    try {
+      // Verify all items were inserted
+      const alice = await db.get(['users', 1])
+      assert.deepEqual(alice.value, { id: 1, name: 'Alice' })
+
+      const bob = await db.get(['users', 2])
+      assert.deepEqual(bob.value, { id: 2, name: 'Bob' })
+
+      const charlie = await db.get(['users', 3])
+      assert.deepEqual(charlie.value, { id: 3, name: 'Charlie' })
+
+      // Verify list works
+      const allUsers = []
+      for await (const entry of db.list({ prefix: ['users'] })) {
+        allUsers.push(entry.value)
+      }
+      assert.equal(allUsers.length, 3)
+    } finally {
+      await db.close()
+    }
+  })
+
+  await test('from() with function keyProperty', async () => {
+    const items = [
+      { email: 'alice@example.com', data: 'A' },
+      { email: 'bob@example.com', data: 'B' },
+    ]
+
+    const db = await Valkeyrie.from(items, {
+      prefix: ['emails'],
+      keyProperty: (item) => item.email,
+    })
+
+    try {
+      const alice = await db.get(['emails', 'alice@example.com'])
+      assert.deepEqual(alice.value, { email: 'alice@example.com', data: 'A' })
+    } finally {
+      await db.close()
+    }
+  })
+
+  await test('from() with file path', async () => {
+    const testPath = join(tmpdir(), `test-from-${randomUUID()}.db`)
+
+    const items = [{ id: 1, value: 'test' }]
+    const db = await Valkeyrie.from(items, {
+      prefix: ['items'],
+      keyProperty: 'id',
+      path: testPath,
+    })
+
+    try {
+      // Verify file exists
+      await access(testPath)
+
+      // Verify data
+      const item = await db.get(['items', 1])
+      assert.deepEqual(item.value, { id: 1, value: 'test' })
+    } finally {
+      await db.close()
+      await unlink(testPath)
+    }
+  })
+
+  await test('from() with expireIn option', async () => {
+    const items = [{ id: 1, value: 'expires' }]
+
+    const db = await Valkeyrie.from(items, {
+      prefix: ['temp'],
+      keyProperty: 'id',
+      expireIn: 100, // 100ms
+    })
+
+    try {
+      // Should exist immediately
+      const result1 = await db.get(['temp', 1])
+      assert.deepEqual(result1.value, { id: 1, value: 'expires' })
+
+      // Wait for expiration and cleanup
+      await setTimeout(150)
+      await db.cleanup()
+
+      // Should be gone
+      const result2 = await db.get(['temp', 1])
+      assert.equal(result2.value, null)
+    } finally {
+      await db.close()
+    }
+  })
+
+  await test('from() with progress callback', async () => {
+    const items = Array.from({ length: 50 }, (_, i) => ({ id: i, value: i }))
+    const progressUpdates: number[] = []
+
+    const db = await Valkeyrie.from(items, {
+      prefix: ['progress'],
+      keyProperty: 'id',
+      onProgress: (processed, total) => {
+        progressUpdates.push(processed)
+        if (total !== undefined) {
+          assert.equal(total, 50)
+        }
+      },
+    })
+
+    try {
+      // Should have received progress updates
+      assert.ok(progressUpdates.length > 0)
+      assert.equal(progressUpdates[progressUpdates.length - 1], 50)
+
+      // Verify data
+      const item = await db.get(['progress', 25])
+      assert.deepEqual(item.value, { id: 25, value: 25 })
+    } finally {
+      await db.close()
+    }
+  })
+
+  await test('from() with large dataset (chunking)', async () => {
+    // Create 2500 items to test chunking (should use 3 atomic operations)
+    const items = Array.from({ length: 2500 }, (_, i) => ({
+      id: i,
+      value: `item-${i}`,
+    }))
+
+    const db = await Valkeyrie.from(items, {
+      prefix: ['large'],
+      keyProperty: 'id',
+    })
+
+    try {
+      // Verify first item
+      const first = await db.get(['large', 0])
+      assert.deepEqual(first.value, { id: 0, value: 'item-0' })
+
+      // Verify middle item
+      const middle = await db.get(['large', 1250])
+      assert.deepEqual(middle.value, { id: 1250, value: 'item-1250' })
+
+      // Verify last item
+      const last = await db.get(['large', 2499])
+      assert.deepEqual(last.value, { id: 2499, value: 'item-2499' })
+
+      // Count all items
+      let count = 0
+      for await (const _ of db.list({ prefix: ['large'] })) {
+        count++
+      }
+      assert.equal(count, 2500)
+    } finally {
+      await db.close()
+    }
+  })
+
+  await test('from() with error handling - stop on error', async () => {
+    const items = [
+      { id: 1, value: 'valid' },
+      { value: 'invalid' }, // Missing id
+      { id: 3, value: 'also valid' },
+    ]
+
+    await assert.rejects(
+      async () => {
+        await Valkeyrie.from(items as { id: number; value: string }[], {
+          prefix: ['test'],
+          keyProperty: 'id',
+          onError: 'stop',
+        })
+      },
+      {
+        name: 'TypeError',
+        message:
+          "Key property 'id' must be a valid KeyPart (Uint8Array, string, number, bigint, boolean, or symbol)",
+      },
+    )
+  })
+
+  await test('from() with error handling - continue on error', async () => {
+    const items = [
+      { id: 1, value: 'valid' },
+      { value: 'invalid' }, // Missing id
+      { id: 3, value: 'also valid' },
+    ]
+    const errors: Error[] = []
+
+    const db = await Valkeyrie.from(items as { id: number; value: string }[], {
+      prefix: ['test'],
+      keyProperty: 'id',
+      onError: 'continue',
+      onErrorCallback: (error) => {
+        errors.push(error)
+      },
+    })
+
+    try {
+      // Should have one error
+      assert.equal(errors.length, 1)
+      assert.ok(errors[0]?.message.includes('Key property'))
+
+      // Valid items should be inserted
+      const item1 = await db.get(['test', 1])
+      assert.deepEqual(item1.value, { id: 1, value: 'valid' })
+
+      const item3 = await db.get(['test', 3])
+      assert.deepEqual(item3.value, { id: 3, value: 'also valid' })
+    } finally {
+      await db.close()
+    }
+  })
+
+  await test('fromAsync() with async generator', async () => {
+    async function* generateItems() {
+      for (let i = 0; i < 5; i++) {
+        await setTimeout(1) // Simulate async operation
+        yield { id: i, value: `async-${i}` }
+      }
+    }
+
+    const db = await Valkeyrie.fromAsync(generateItems(), {
+      prefix: ['async'],
+      keyProperty: 'id',
+    })
+
+    try {
+      // Verify all items
+      for (let i = 0; i < 5; i++) {
+        const item = await db.get(['async', i])
+        assert.deepEqual(item.value, { id: i, value: `async-${i}` })
+      }
+    } finally {
+      await db.close()
+    }
+  })
+
+  await test('fromAsync() with progress callback', async () => {
+    async function* generateItems() {
+      for (let i = 0; i < 10; i++) {
+        yield { id: i, value: i }
+      }
+    }
+
+    const progressUpdates: number[] = []
+    const db = await Valkeyrie.fromAsync(generateItems(), {
+      prefix: ['async-progress'],
+      keyProperty: 'id',
+      onProgress: (processed, total) => {
+        progressUpdates.push(processed)
+        // For async iterables, total is undefined until the end
+      },
+    })
+
+    try {
+      assert.ok(progressUpdates.length > 0)
+      assert.equal(progressUpdates[progressUpdates.length - 1], 10)
+    } finally {
+      await db.close()
+    }
+  })
+
+  await test('fromAsync() with large dataset (chunking)', async () => {
+    async function* generateLargeDataset() {
+      for (let i = 0; i < 1500; i++) {
+        yield { id: i, data: `large-${i}` }
+      }
+    }
+
+    const db = await Valkeyrie.fromAsync(generateLargeDataset(), {
+      prefix: ['async-large'],
+      keyProperty: 'id',
+    })
+
+    try {
+      // Verify some items
+      const first = await db.get(['async-large', 0])
+      assert.deepEqual(first.value, { id: 0, data: 'large-0' })
+
+      const last = await db.get(['async-large', 1499])
+      assert.deepEqual(last.value, { id: 1499, data: 'large-1499' })
+
+      // Count items
+      let count = 0
+      for await (const _ of db.list({ prefix: ['async-large'] })) {
+        count++
+      }
+      assert.equal(count, 1500)
+    } finally {
+      await db.close()
+    }
+  })
+
+  await test('from() with different key types', async () => {
+    const items = [
+      { key: 'string-key', value: 1 },
+      { key: 42, value: 2 },
+      { key: true, value: 3 },
+      { key: 100n, value: 4 },
+    ]
+
+    // Test with string keys
+    const db1 = await Valkeyrie.from([items[0]], {
+      prefix: ['keys'],
+      keyProperty: 'key',
+    })
+    try {
+      const item = await db1.get(['keys', 'string-key'])
+      assert.deepEqual(item.value, { key: 'string-key', value: 1 })
+    } finally {
+      await db1.close()
+    }
+
+    // Test with number keys
+    const db2 = await Valkeyrie.from([items[1]], {
+      prefix: ['keys'],
+      keyProperty: 'key',
+    })
+    try {
+      const item = await db2.get(['keys', 42])
+      assert.deepEqual(item.value, { key: 42, value: 2 })
+    } finally {
+      await db2.close()
+    }
+
+    // Test with boolean keys
+    const db3 = await Valkeyrie.from([items[2]], {
+      prefix: ['keys'],
+      keyProperty: 'key',
+    })
+    try {
+      const item = await db3.get(['keys', true])
+      assert.deepEqual(item.value, { key: true, value: 3 })
+    } finally {
+      await db3.close()
+    }
+
+    // Test with bigint keys
+    const db4 = await Valkeyrie.from([items[3]], {
+      prefix: ['keys'],
+      keyProperty: 'key',
+    })
+    try {
+      const item = await db4.get(['keys', 100n])
+      assert.deepEqual(item.value, { key: 100n, value: 4 })
+    } finally {
+      await db4.close()
+    }
+  })
+
+  await test('from() with empty prefix', async () => {
+    const items = [{ id: 1, value: 'test' }]
+
+    const db = await Valkeyrie.from(items, {
+      prefix: [],
+      keyProperty: 'id',
+    })
+
+    try {
+      const item = await db.get([1])
+      assert.deepEqual(item.value, { id: 1, value: 'test' })
+    } finally {
+      await db.close()
+    }
+  })
+
+  await test('from() with nested prefix', async () => {
+    const items = [{ id: 1, value: 'nested' }]
+
+    const db = await Valkeyrie.from(items, {
+      prefix: ['app', 'data', 'users'],
+      keyProperty: 'id',
+    })
+
+    try {
+      const item = await db.get(['app', 'data', 'users', 1])
+      assert.deepEqual(item.value, { id: 1, value: 'nested' })
+    } finally {
+      await db.close()
+    }
+  })
 })
