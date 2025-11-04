@@ -376,7 +376,11 @@ describe('sqliteDriver', async () => {
 
       // All versionstamps should be 20 characters
       for (const stamp of allStamps) {
-        assert.strictEqual(stamp.length, 20, 'Versionstamp should be 20 characters')
+        assert.strictEqual(
+          stamp.length,
+          20,
+          'Versionstamp should be 20 characters',
+        )
       }
     } finally {
       await driver1.close()

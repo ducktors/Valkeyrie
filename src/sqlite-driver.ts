@@ -326,7 +326,10 @@ export const sqliteDriver = defineDriver(
       watch: (keyHashes: string[]) => {
         let watchController:
           | ReadableStreamDefaultController<
-              (DriverValue | { keyHash: string; value: null; versionstamp: null })[]
+              (
+                | DriverValue
+                | { keyHash: string; value: null; versionstamp: null }
+              )[]
             >
           | undefined
         return new ReadableStream({
