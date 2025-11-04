@@ -83,7 +83,6 @@ const valkeyrieSymbol = Symbol('Valkeyrie')
 const commitVersionstampSymbol = Symbol('ValkeyrieCommitVersionstamp')
 export class Valkeyrie {
   #driver: Driver
-  #lastVersionstamp: bigint
   #isClosed = false
   #destroyOnClose = false
   private constructor(
@@ -98,7 +97,6 @@ export class Valkeyrie {
     }
     this.#driver = functions
     this.#destroyOnClose = options.destroyOnClose
-    this.#lastVersionstamp = 0n
   }
 
   commitVersionstamp(): symbol {
@@ -421,24 +419,14 @@ export class Valkeyrie {
   }
 
   /**
-   * Generates a unique versionstamp for each operation.
-   * This method ensures that each versionstamp is monotonically increasing,
-   * even within the same microsecond, by using the current timestamp in microseconds
-   * and incrementing the last used versionstamp if it's not greater than the current timestamp.
-   * The generated versionstamp is a hexadecimal string representation of the BigInt value.
+   * Generates a unique versionstamp for each operation using database-level sequence.
+   * This ensures cross-process atomicity and prevents versionstamp collisions
+   * between multiple instances sharing the same database.
    *
    * @returns A string representing the generated versionstamp.
    */
-  private generateVersionstamp(): string {
-    // Get current timestamp in microseconds
-    const now = BigInt(Date.now()) * 1000n
-
-    // Ensure monotonically increasing values even within the same microsecond
-    this.#lastVersionstamp =
-      this.#lastVersionstamp < now ? now : this.#lastVersionstamp + 1n
-
-    // Convert the BigInt to a hexadecimal string and pad it to 20 characters
-    return this.#lastVersionstamp.toString(16).padStart(20, '0')
+  private async generateVersionstamp(): Promise<string> {
+    return await this.#driver.generateVersionstamp()
   }
 
   /**
@@ -693,7 +681,7 @@ export class Valkeyrie {
       throw new Error('Key cannot be empty')
     }
     const keyHash = this.hashKey(key, 'write')
-    const versionstamp = this.generateVersionstamp()
+    const versionstamp = await this.generateVersionstamp()
 
     await this.#driver.set(
       keyHash,
@@ -1060,7 +1048,7 @@ export class Valkeyrie {
     mutations: Mutation[],
   ): Promise<{ ok: true; versionstamp: string } | { ok: false }> {
     this.throwIfClosed()
-    const versionstamp = this.generateVersionstamp()
+    const versionstamp = await this.generateVersionstamp()
 
     try {
       return await this.#driver.withTransaction(async () => {
