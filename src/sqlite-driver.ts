@@ -324,8 +324,14 @@ export const sqliteDriver = defineDriver(
         }
       },
       watch: (keyHashes: string[]) => {
+        let watchController:
+          | ReadableStreamDefaultController<
+              (DriverValue | { keyHash: string; value: null; versionstamp: null })[]
+            >
+          | undefined
         return new ReadableStream({
           start(controller) {
+            watchController = controller
             watchQueue.push({ keyHashes, controller })
             // Send initial values
             const now = Date.now()
@@ -351,14 +357,18 @@ export const sqliteDriver = defineDriver(
               controller.enqueue(results)
             })
           },
-          cancel(controller) {
-            const index = watchQueue.findIndex(
-              (w) => w.controller === controller,
-            )
-            if (index !== -1) {
-              watchQueue.splice(index, 1)
+          cancel() {
+            // cancel() receives a reason parameter, not the controller
+            // The controller should be accessed from the closure
+            // Note: Don't call controller.close() here - the stream infrastructure handles that
+            if (watchController) {
+              const index = watchQueue.findIndex(
+                (w) => w.controller === watchController,
+              )
+              if (index !== -1) {
+                watchQueue.splice(index, 1)
+              }
             }
-            controller.close()
           },
         })
       },

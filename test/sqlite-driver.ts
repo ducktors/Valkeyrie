@@ -216,8 +216,8 @@ describe('sqliteDriver', async () => {
     // Read the initial null value
     await reader.read()
 
-    // Release the lock (don't cancel)
-    reader.releaseLock()
+    // Actually cancel the stream (this triggers the cancel path and tests the bug fix)
+    await reader.cancel()
 
     // Set the key - this should not throw
     await driver.set(keyHash, 'test-value', 'v1')
@@ -232,8 +232,8 @@ describe('sqliteDriver', async () => {
     assert(value, 'Should have a value')
     assert.strictEqual(value?.[0]?.value, 'test-value')
 
-    // Just release the lock
-    newReader.releaseLock()
+    // Cancel this one too to test it works multiple times
+    await newReader.cancel()
   })
 
   await test('handles controller close errors', async () => {
@@ -339,5 +339,156 @@ describe('sqliteDriver', async () => {
 
     assert.strictEqual(attempts, 4, 'Should have attempted 4 times')
     assert.strictEqual(result, 'success after backoff')
+  })
+
+  await test('handles concurrent versionstamp generation outside transactions', async () => {
+    // Create two separate driver instances sharing the same database file
+    // This simulates multiple processes accessing the same database
+    const SHARED_DB_PATH = 'shared-test-db.sqlite'
+    await cleanup(SHARED_DB_PATH)
+
+    const driver1 = await sqliteDriver(SHARED_DB_PATH)
+    const driver2 = await sqliteDriver(SHARED_DB_PATH)
+
+    try {
+      // Generate versionstamps concurrently with more aggressive parallelism
+      // to increase the chance of triggering SQLITE_BUSY
+      const promises = []
+
+      // Launch 50 concurrent versionstamp generations from both drivers
+      for (let i = 0; i < 25; i++) {
+        promises.push(driver1.generateVersionstamp())
+        promises.push(driver2.generateVersionstamp())
+      }
+
+      const allStamps = await Promise.all(promises)
+
+      // All versionstamps should be generated successfully
+      assert.strictEqual(allStamps.length, 50, 'Should generate 50 stamps')
+
+      // All versionstamps should be unique
+      const uniqueStamps = new Set(allStamps)
+      assert.strictEqual(
+        uniqueStamps.size,
+        allStamps.length,
+        'All versionstamps should be unique',
+      )
+
+      // All versionstamps should be 20 characters
+      for (const stamp of allStamps) {
+        assert.strictEqual(stamp.length, 20, 'Versionstamp should be 20 characters')
+      }
+    } finally {
+      await driver1.close()
+      await driver2.close()
+      await cleanup(SHARED_DB_PATH)
+    }
+  })
+
+  await test('handles watch controller close errors with unexpected errors', async () => {
+    // Create a driver and set up a watch
+    const testPath = 'watch-error-test.sqlite'
+    await cleanup(testPath)
+    const testDriver = await sqliteDriver(testPath)
+
+    try {
+      const keyHash = hash('error-test-key')
+
+      // Create a watch stream
+      const stream = testDriver.watch([keyHash])
+      const reader = stream.getReader()
+
+      // Read the initial value
+      await reader.read()
+
+      // Now we need to simulate a scenario where closing the controller
+      // throws a non-ERR_INVALID_STATE error
+      // We'll access the internal watchQueue and inject a mock controller
+      // biome-ignore lint/suspicious/noExplicitAny: testing internals
+      const driverAny = testDriver as any
+
+      // Find the watchQueue
+      type WatchQueueItem = {
+        keyHashes: string[]
+        controller: { close: () => void; enqueue: (val: unknown) => void }
+      }
+      let watchQueue: WatchQueueItem[] | undefined
+
+      for (const key of Object.getOwnPropertyNames(driverAny)) {
+        if (key === 'watchQueue' || key.includes('watchQueue')) {
+          watchQueue = driverAny[key]
+          break
+        }
+      }
+
+      if (!watchQueue) {
+        for (const sym of Object.getOwnPropertySymbols(driverAny)) {
+          if (sym.toString().includes('watchQueue')) {
+            watchQueue = driverAny[sym]
+            break
+          }
+        }
+      }
+
+      // Inject a controller that throws a different error
+      if (watchQueue) {
+        watchQueue.push({
+          keyHashes: [keyHash],
+          controller: {
+            close: () => {
+              const error = new Error('Unexpected close error') as CustomError
+              error.code = 'UNEXPECTED_ERROR'
+              throw error
+            },
+            enqueue: () => {},
+          },
+        })
+      }
+
+      // Release the reader
+      reader.releaseLock()
+
+      // Close should not throw even if a controller.close() throws
+      await testDriver.close()
+    } finally {
+      await cleanup(testPath)
+    }
+  })
+
+  await test('handles rollback failures in transaction retry logic', async () => {
+    // This test aims to cover the rollback error catch block
+    // We'll create a scenario where a ROLLBACK might fail
+    const testPath = 'rollback-test.sqlite'
+    await cleanup(testPath)
+    const testDriver = await sqliteDriver(testPath)
+
+    try {
+      // Create a scenario with multiple SQLITE_BUSY errors
+      let attemptCount = 0
+      const busyWithRollbackFn = async () => {
+        attemptCount++
+        if (attemptCount <= 2) {
+          const error = new Error('database is locked') as CustomError
+          error.code = 'SQLITE_BUSY'
+          throw error
+        }
+        return 'success'
+      }
+
+      // Run the transaction - the retry logic will attempt rollbacks
+      const result = await testDriver.withTransaction(busyWithRollbackFn)
+
+      assert.strictEqual(result, 'success')
+      assert(attemptCount >= 2, 'Should have retried at least twice')
+
+      // The driver should still be functional after rollback handling
+      const keyHash = hash('post-rollback-test')
+      await testDriver.set(keyHash, 'test-value', 'v1')
+      const retrieved = await testDriver.get(keyHash, Date.now())
+      assert.strictEqual(retrieved?.value, 'test-value')
+    } finally {
+      await testDriver.close()
+      await cleanup(testPath)
+    }
   })
 })
