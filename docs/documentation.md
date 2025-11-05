@@ -6,6 +6,7 @@
 - [Basic Usage](#basic-usage)
   - [Opening a Database](#opening-a-database)
   - [Creating and Populating Databases](#creating-and-populating-databases)
+  - [Schema Validation](#schema-validation)
   - [Closing a Database](#closing-a-database)
   - [Database Management](#database-management)
   - [Setting Values](#setting-values)
@@ -251,6 +252,320 @@ const db = await Valkeyrie.fromAsync(processLargeDataset(), {
 - Each chunk is inserted atomically for consistency
 - Handles datasets of millions of items efficiently
 - Memory efficient for async iterables (processes items as they arrive)
+
+### Schema Validation
+
+Valkeyrie supports runtime validation using [Standard Schema](https://github.com/standard-schema/standard-schema), enabling compatibility with popular validation libraries like Zod, Valibot, and ArkType. This feature provides type-safe data validation at write-time, ensuring data integrity without affecting read performance.
+
+#### Why Schema Validation?
+
+Schema validation helps you:
+- Enforce data structure and type constraints at write-time
+- Catch data errors early before they're persisted
+- Maintain data consistency across your application
+- Get better TypeScript type inference (planned for future release)
+- Prevent invalid data from entering your database
+
+#### Basic Usage
+
+Use the `withSchema()` builder method to register validation schemas for specific key patterns:
+
+```typescript
+import { Valkeyrie } from 'valkeyrie';
+import { z } from 'zod';
+
+// Define your schema
+const userSchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+  age: z.number().min(0)
+});
+
+// Register schema with a key pattern
+const db = await Valkeyrie
+  .withSchema(['users', '*'], userSchema)
+  .open();
+
+// Valid data - succeeds
+await db.set(['users', 'alice'], {
+  name: 'Alice',
+  email: 'alice@example.com',
+  age: 30
+}); // ✅ Success
+
+// Invalid data - throws ValidationError
+await db.set(['users', 'bob'], {
+  name: 'Bob',
+  email: 'invalid-email', // Invalid email format
+  age: 25
+}); // ❌ Throws ValidationError
+```
+
+#### Using Different Schema Libraries
+
+Valkeyrie works with any library that implements the Standard Schema specification:
+
+**Zod:**
+```typescript
+import { z } from 'zod';
+
+const productSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  price: z.number().positive(),
+  inStock: z.boolean()
+});
+
+const db = await Valkeyrie
+  .withSchema(['products', '*'], productSchema)
+  .open();
+```
+
+**Valibot:**
+```typescript
+import * as v from 'valibot';
+
+const productSchema = v.object({
+  id: v.string(),
+  name: v.string(),
+  price: v.pipe(v.number(), v.minValue(0)),
+  inStock: v.boolean()
+});
+
+const db = await Valkeyrie
+  .withSchema(['products', '*'], productSchema)
+  .open();
+```
+
+**ArkType:**
+```typescript
+import { type } from 'arktype';
+
+const productSchema = type({
+  id: 'string',
+  name: 'string',
+  price: 'number>0',
+  inStock: 'boolean'
+});
+
+const db = await Valkeyrie
+  .withSchema(['products', '*'], productSchema)
+  .open();
+```
+
+#### Registering Multiple Schemas
+
+Chain multiple `withSchema()` calls to validate different key patterns:
+
+```typescript
+import { z } from 'zod';
+
+const userSchema = z.object({
+  name: z.string(),
+  email: z.string().email()
+});
+
+const postSchema = z.object({
+  title: z.string(),
+  content: z.string(),
+  published: z.boolean()
+});
+
+const db = await Valkeyrie
+  .withSchema(['users', '*'], userSchema)
+  .withSchema(['posts', '*'], postSchema)
+  .open();
+
+// Each pattern uses its own schema
+await db.set(['users', 'alice'], { name: 'Alice', email: 'alice@example.com' });
+await db.set(['posts', 'p1'], { title: 'Hello', content: 'World', published: true });
+```
+
+#### Wildcard Pattern Matching
+
+The `*` character in key patterns acts as a "exactly one key part" wildcard:
+
+```typescript
+// Pattern: ['users', '*']
+// Matches: ['users', 'alice'], ['users', 'bob'], ['users', 123]
+// Does NOT match: ['users', 'alice', 'profile'] (too many parts)
+
+// Pattern: ['users', '*', 'posts', '*']
+// Matches: ['users', 'alice', 'posts', 'p1']
+// Does NOT match: ['users', 'alice', 'posts'] (missing last part)
+```
+
+**Pattern Priority Rules:**
+1. Exact matches (no wildcards) take priority over wildcard patterns
+2. You cannot register the same pattern twice (throws an error)
+
+```typescript
+const userSchema = z.object({ name: z.string() });
+const aliceSchema = z.object({ name: z.string(), special: z.boolean() });
+
+const db = await Valkeyrie
+  .withSchema(['users', '*'], userSchema)       // Wildcard pattern
+  .withSchema(['users', 'alice'], aliceSchema)  // Exact pattern
+  .open();
+
+// Uses aliceSchema (exact match has priority)
+await db.set(['users', 'alice'], { name: 'Alice', special: true });
+
+// Uses userSchema (wildcard match)
+await db.set(['users', 'bob'], { name: 'Bob' });
+```
+
+#### Reserved Characters
+
+The `*` character is reserved for wildcard patterns and cannot be used as an actual key part:
+
+```typescript
+const db = await Valkeyrie
+  .withSchema(['users', '*'], userSchema)
+  .open();
+
+// ❌ Throws TypeError
+await db.set(['users', '*'], { name: 'Test' });
+```
+
+#### Validation Timing
+
+- **Write operations**: Validated synchronously on `set()`
+- **Atomic operations**: Validated asynchronously at `commit()` time
+- **Read operations**: No validation (better performance)
+- **Permissive by default**: Keys without matching schemas are not validated
+
+```typescript
+const db = await Valkeyrie
+  .withSchema(['users', '*'], userSchema)
+  .open();
+
+// Validated
+await db.set(['users', 'alice'], { name: 'Alice', email: 'alice@example.com' });
+
+// Not validated (no matching schema pattern)
+await db.set(['settings', 'theme'], 'dark');
+```
+
+#### Schema Transformations
+
+Schemas can transform data during validation:
+
+```typescript
+import { z } from 'zod';
+
+const userSchema = z.object({
+  name: z.string().transform(name => name.toUpperCase()),
+  email: z.string().email().transform(email => email.toLowerCase()),
+  age: z.number()
+});
+
+const db = await Valkeyrie
+  .withSchema(['users', '*'], userSchema)
+  .open();
+
+await db.set(['users', 'alice'], {
+  name: 'alice',
+  email: 'Alice@Example.COM',
+  age: 30
+});
+
+const user = await db.get(['users', 'alice']);
+console.log(user.value);
+// { name: 'ALICE', email: 'alice@example.com', age: 30 }
+```
+
+#### Validation with Atomic Operations
+
+Atomic operations validate all `set` mutations at commit time:
+
+```typescript
+const db = await Valkeyrie
+  .withSchema(['users', '*'], userSchema)
+  .open();
+
+const atomic = db.atomic()
+  .set(['users', 'alice'], { name: 'Alice', email: 'alice@example.com' })
+  .set(['users', 'bob'], { name: 'Bob', email: 'invalid-email' })
+  .delete(['users', 'charlie']);
+
+// Validation happens here - throws ValidationError for bob's email
+await atomic.commit();
+```
+
+If any validation fails, the entire atomic operation is rolled back (all-or-nothing guarantee).
+
+#### Error Handling
+
+Failed validations throw a `ValidationError` with details about what went wrong:
+
+```typescript
+import { ValidationError } from 'valkeyrie';
+
+try {
+  await db.set(['users', 'bob'], {
+    name: 'Bob',
+    email: 'invalid-email',
+    age: -5
+  });
+} catch (error) {
+  if (error instanceof ValidationError) {
+    console.log('Failed to validate key:', error.key);
+    // ['users', 'bob']
+
+    console.log('Validation issues:', error.issues);
+    // [
+    //   { message: 'Invalid email', path: ['email'] },
+    //   { message: 'Number must be greater than or equal to 0', path: ['age'] }
+    // ]
+  }
+}
+```
+
+#### Using with Factory Methods
+
+Schema validation works seamlessly with `from()` and `fromAsync()`:
+
+```typescript
+import { z } from 'zod';
+
+const userSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  email: z.string().email()
+});
+
+const users = [
+  { id: 1, name: 'Alice', email: 'alice@example.com' },
+  { id: 2, name: 'Bob', email: 'bob@example.com' }
+];
+
+// All items are validated during import
+const db = await Valkeyrie
+  .withSchema(['users', '*'], userSchema)
+  .from(users, {
+    prefix: ['users'],
+    keyProperty: 'id'
+  });
+```
+
+If any item fails validation, the import stops (or continues based on `onError` option).
+
+#### Best Practices
+
+1. **Design key patterns carefully**: Think about your data hierarchy before defining schemas
+2. **Use exact patterns for special cases**: Override wildcard patterns with exact matches when needed
+3. **Validate early**: Use schemas to catch data errors before they're persisted
+4. **Handle ValidationError**: Always catch and handle validation errors appropriately
+5. **Don't over-validate**: Only validate keys that need strict data integrity
+6. **Test your schemas**: Ensure your schemas match your actual data structures
+
+#### Limitations
+
+- **Type inference not yet implemented**: TypeScript type inference from schemas is planned for a future release
+- **Write-time only**: Validation only occurs on writes, not reads
+- **No schema migration**: Changing schemas doesn't validate existing data
+- **Pattern-based only**: Cannot validate based on data content, only key patterns
 
 ### Closing a Database
 

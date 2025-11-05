@@ -32,3 +32,9 @@ export const kFrom = Symbol('from')
  * Only accessible to ValkeyrieBuilder.
  */
 export const kFromAsync = Symbol('fromAsync')
+
+/**
+ * Internal symbol for accessing the schema registry.
+ * Only accessible to AtomicOperation for validation.
+ */
+export const kSchemaRegistry = Symbol('schemaRegistry')

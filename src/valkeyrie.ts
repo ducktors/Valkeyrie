@@ -3,6 +3,7 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { Driver } from './driver.js'
 import { KvU64 } from './kv-u64.js'
 import type { SchemaRegistry } from './schema-registry.js'
+import { validateReservedKeyParts, validateValue } from './schema-validator.js'
 import type { Serializer } from './serializers/serializer.js'
 import { sqliteDriver } from './sqlite-driver.js'
 import {
@@ -10,12 +11,21 @@ import {
   kFrom,
   kFromAsync,
   kOpen,
+  kSchemaRegistry,
   kValkeyrie,
 } from './symbols.js'
 import { ValkeyrieBuilder } from './valkeyrie-builder.js'
 
 export type KeyPart = Uint8Array | string | number | bigint | boolean | symbol
 export type Key = KeyPart[]
+
+/**
+ * Internal helper type that automatically infers StandardSchemaV1 output if T is a schema.
+ * Falls back to T if it's not a schema.
+ */
+type MaybeInferSchema<T> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferOutput<T>
+  : T
 
 interface AtomicCheck {
   key: Key
@@ -93,7 +103,6 @@ export class Valkeyrie {
   #driver: Driver
   #isClosed = false
   #destroyOnClose = false
-  // @ts-expect-error - Schema registry is stored for future validation feature
   readonly #schemaRegistry?: SchemaRegistry
 
   private constructor(
@@ -724,7 +733,9 @@ export class Valkeyrie {
     return parts
   }
 
-  public async get<T = unknown>(key: Key): Promise<EntryMaybe<T>> {
+  public async get<T = unknown>(
+    key: Key,
+  ): Promise<EntryMaybe<MaybeInferSchema<T>>> {
     this.throwIfClosed()
     this.validateKeys([key])
     if (key.length === 0) {
@@ -740,12 +751,14 @@ export class Valkeyrie {
 
     return {
       key: this.decodeKeyHash(result.keyHash),
-      value: result.value as T,
+      value: result.value as MaybeInferSchema<T>,
       versionstamp: result.versionstamp,
     }
   }
 
-  public async getMany<T = unknown>(keys: Key[]): Promise<EntryMaybe<T>[]> {
+  public async getMany<T = unknown>(
+    keys: Key[],
+  ): Promise<EntryMaybe<MaybeInferSchema<T>>[]> {
     this.throwIfClosed()
     this.validateKeys(keys)
     if (keys.length > 10) {
@@ -764,12 +777,19 @@ export class Valkeyrie {
     if (key.length === 0) {
       throw new Error('Key cannot be empty')
     }
+
+    // Validate that key doesn't contain reserved '*' wildcard
+    validateReservedKeyParts(key)
+
+    // Validate value against schema if one is registered
+    const validatedValue = await validateValue(key, value, this.#schemaRegistry)
+
     const keyHash = this.hashKey(key, 'write')
     const versionstamp = await this.generateVersionstamp()
 
     await this.#driver.set(
       keyHash,
-      value,
+      validatedValue,
       versionstamp,
       options.expireIn ? Date.now() + options.expireIn : undefined,
     )
@@ -1127,6 +1147,14 @@ export class Valkeyrie {
     return new AtomicOperation(this)
   }
 
+  /**
+   * Internal symbol-based accessor for schema registry.
+   * Used by AtomicOperation for validation.
+   */
+  get [kSchemaRegistry](): SchemaRegistry | undefined {
+    return this.#schemaRegistry
+  }
+
   public async executeAtomicOperation(
     checks: Check[],
     mutations: Mutation[],
@@ -1300,6 +1328,9 @@ export class AtomicOperation {
         throw new Error('Key cannot be empty')
       }
 
+      // Validate that key doesn't contain reserved '*' wildcard
+      validateReservedKeyParts(mutation.key)
+
       const keySize = serialize(mutation.key).length
       this.totalKeySize += keySize
 
@@ -1392,6 +1423,34 @@ export class AtomicOperation {
     if (this.totalMutationSize > 819200) {
       throw new TypeError('Total mutation size too large (max 819200 bytes)')
     }
-    return this.valkeyrie.executeAtomicOperation(this.checks, this.mutations)
+
+    // Validate all 'set' mutations against schemas before committing
+    const schemaRegistry = this.valkeyrie[kSchemaRegistry]
+    const validatedMutations: Mutation[] = []
+
+    for (const mutation of this.mutations) {
+      if (mutation.type === 'set') {
+        // Validate the value against the schema
+        const validatedValue = await validateValue(
+          mutation.key,
+          mutation.value,
+          schemaRegistry,
+        )
+
+        // Create new mutation with validated value
+        validatedMutations.push({
+          ...mutation,
+          value: validatedValue,
+        })
+      } else {
+        // Non-set mutations don't need validation
+        validatedMutations.push(mutation)
+      }
+    }
+
+    return this.valkeyrie.executeAtomicOperation(
+      this.checks,
+      validatedMutations,
+    )
   }
 }

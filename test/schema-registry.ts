@@ -238,7 +238,189 @@ describe('SchemaRegistry', () => {
       assert.strictEqual(found3, commentSchema)
     })
 
-    test('exact match takes precedence with first registered', () => {
+    test('exact match takes precedence over wildcard regardless of registration order', () => {
+      const registry = new SchemaRegistry()
+      const wildcardSchema = createMockSchema('wildcard')
+      const exactSchema = createMockSchema('exact')
+
+      // Register wildcard first, exact second
+      registry.register(['users', '*'], wildcardSchema)
+      registry.register(['users', 'alice'], exactSchema)
+
+      // Exact match should win even though wildcard was registered first
+      const found = registry.getSchema(['users', 'alice'])
+      assert.strictEqual(found, exactSchema)
+    })
+
+    test('throws error when registering duplicate wildcard pattern', () => {
+      const registry = new SchemaRegistry()
+      const schema1 = createMockSchema('first')
+      const schema2 = createMockSchema('second')
+
+      // First registration succeeds
+      registry.register(['users', '*'], schema1)
+
+      // Second registration with same pattern should throw
+      assert.throws(
+        () => {
+          registry.register(['users', '*'], schema2)
+        },
+        (error: Error) => {
+          assert.ok(error instanceof Error)
+          assert.ok(error.message.includes('already registered'))
+          assert.ok(error.message.includes('[users, *]'))
+          return true
+        },
+      )
+    })
+
+    test('throws error when registering duplicate exact pattern', () => {
+      const registry = new SchemaRegistry()
+      const schema1 = createMockSchema('first')
+      const schema2 = createMockSchema('second')
+
+      // First registration succeeds
+      registry.register(['users', 'alice'], schema1)
+
+      // Second registration with same pattern should throw
+      assert.throws(
+        () => {
+          registry.register(['users', 'alice'], schema2)
+        },
+        (error: Error) => {
+          assert.ok(error instanceof Error)
+          assert.ok(error.message.includes('already registered'))
+          assert.ok(error.message.includes('[users, alice]'))
+          return true
+        },
+      )
+    })
+
+    test('allows different patterns to coexist', () => {
+      const registry = new SchemaRegistry()
+      const exactSchema = createMockSchema('exact')
+      const wildcardSchema = createMockSchema('wildcard')
+
+      // These are different patterns, both should succeed
+      registry.register(['users', 'alice'], exactSchema)
+      registry.register(['users', '*'], wildcardSchema)
+
+      // Exact match for alice
+      const foundAlice = registry.getSchema(['users', 'alice'])
+      assert.strictEqual(foundAlice, exactSchema)
+
+      // Wildcard match for bob
+      const foundBob = registry.getSchema(['users', 'bob'])
+      assert.strictEqual(foundBob, wildcardSchema)
+    })
+  })
+
+  describe('Duplicate Registration Prevention', () => {
+    test('detects duplicate patterns with different key types', () => {
+      const registry = new SchemaRegistry()
+      const schema1 = createMockSchema('first')
+      const schema2 = createMockSchema('second')
+
+      // Register with number key
+      registry.register(['items', 123], schema1)
+
+      // Try to register same pattern again
+      assert.throws(
+        () => {
+          registry.register(['items', 123], schema2)
+        },
+        (error: Error) => {
+          assert.ok(error.message.includes('already registered'))
+          return true
+        },
+      )
+    })
+
+    test('detects duplicate patterns with bigint', () => {
+      const registry = new SchemaRegistry()
+      const schema1 = createMockSchema('first')
+      const schema2 = createMockSchema('second')
+
+      registry.register(['data', 123n], schema1)
+
+      assert.throws(() => {
+        registry.register(['data', 123n], schema2)
+      }, Error)
+    })
+
+    test('detects duplicate patterns with boolean', () => {
+      const registry = new SchemaRegistry()
+      const schema1 = createMockSchema('first')
+      const schema2 = createMockSchema('second')
+
+      registry.register(['flags', true], schema1)
+
+      assert.throws(() => {
+        registry.register(['flags', true], schema2)
+      }, Error)
+    })
+
+    test('detects duplicate patterns with Uint8Array', () => {
+      const registry = new SchemaRegistry()
+      const schema1 = createMockSchema('first')
+      const schema2 = createMockSchema('second')
+
+      registry.register(['binary', new Uint8Array([1, 2, 3])], schema1)
+
+      assert.throws(() => {
+        registry.register(['binary', new Uint8Array([1, 2, 3])], schema2)
+      }, Error)
+    })
+
+    test('allows similar patterns with different values', () => {
+      const registry = new SchemaRegistry()
+      const schema1 = createMockSchema('first')
+      const schema2 = createMockSchema('second')
+
+      // These are different patterns
+      registry.register(['items', 123], schema1)
+      registry.register(['items', 456], schema2) // Different number - should succeed
+
+      const found1 = registry.getSchema(['items', 123])
+      assert.strictEqual(found1, schema1)
+
+      const found2 = registry.getSchema(['items', 456])
+      assert.strictEqual(found2, schema2)
+    })
+
+    test('detects duplicate nested patterns', () => {
+      const registry = new SchemaRegistry()
+      const schema1 = createMockSchema('first')
+      const schema2 = createMockSchema('second')
+
+      registry.register(['users', '*', 'posts', '*'], schema1)
+
+      assert.throws(
+        () => {
+          registry.register(['users', '*', 'posts', '*'], schema2)
+        },
+        (error: Error) => {
+          assert.ok(error.message.includes('already registered'))
+          return true
+        },
+      )
+    })
+
+    test('detects duplicate empty pattern', () => {
+      const registry = new SchemaRegistry()
+      const schema1 = createMockSchema('first')
+      const schema2 = createMockSchema('second')
+
+      registry.register([], schema1)
+
+      assert.throws(() => {
+        registry.register([], schema2)
+      }, Error)
+    })
+  })
+
+  describe('Exact Match Priority', () => {
+    test('exact match wins over wildcard - wildcard registered first', () => {
       const registry = new SchemaRegistry()
       const wildcardSchema = createMockSchema('wildcard')
       const exactSchema = createMockSchema('exact')
@@ -246,9 +428,95 @@ describe('SchemaRegistry', () => {
       registry.register(['users', '*'], wildcardSchema)
       registry.register(['users', 'alice'], exactSchema)
 
-      // First registered pattern wins (linear search)
       const found = registry.getSchema(['users', 'alice'])
+      assert.strictEqual(found, exactSchema)
+    })
+
+    test('exact match wins over wildcard - exact registered first', () => {
+      const registry = new SchemaRegistry()
+      const exactSchema = createMockSchema('exact')
+      const wildcardSchema = createMockSchema('wildcard')
+
+      registry.register(['users', 'alice'], exactSchema)
+      registry.register(['users', '*'], wildcardSchema)
+
+      const found = registry.getSchema(['users', 'alice'])
+      assert.strictEqual(found, exactSchema)
+    })
+
+    test('exact match wins with multiple wildcards registered', () => {
+      const registry = new SchemaRegistry()
+      const wildcard1 = createMockSchema('wildcard1')
+      const wildcard2 = createMockSchema('wildcard2')
+      const exactSchema = createMockSchema('exact')
+
+      registry.register(['users', '*'], wildcard1)
+      registry.register(['*', 'alice'], wildcard2)
+      registry.register(['users', 'alice'], exactSchema)
+
+      const found = registry.getSchema(['users', 'alice'])
+      assert.strictEqual(found, exactSchema)
+    })
+
+    test('exact match with nested paths wins over nested wildcards', () => {
+      const registry = new SchemaRegistry()
+      const wildcardSchema = createMockSchema('wildcard')
+      const exactSchema = createMockSchema('exact')
+
+      registry.register(['users', '*', 'posts', '*'], wildcardSchema)
+      registry.register(['users', 'alice', 'posts', 'p1'], exactSchema)
+
+      const found = registry.getSchema(['users', 'alice', 'posts', 'p1'])
+      assert.strictEqual(found, exactSchema)
+    })
+
+    test('wildcard match works when no exact match exists', () => {
+      const registry = new SchemaRegistry()
+      const wildcardSchema = createMockSchema('wildcard')
+      const exactSchema = createMockSchema('exact')
+
+      registry.register(['users', '*'], wildcardSchema)
+      registry.register(['users', 'alice'], exactSchema)
+
+      // Query for 'bob' should match wildcard
+      const found = registry.getSchema(['users', 'bob'])
       assert.strictEqual(found, wildcardSchema)
+    })
+
+    test('partial wildcard is not an exact match', () => {
+      const registry = new SchemaRegistry()
+      const partialWildcard = createMockSchema('partialWildcard')
+      const exactSchema = createMockSchema('exact')
+
+      // Pattern with one wildcard and exact parts
+      registry.register(['users', '*', 'profile'], partialWildcard)
+      registry.register(['users', 'alice', 'profile'], exactSchema)
+
+      const found = registry.getSchema(['users', 'alice', 'profile'])
+      assert.strictEqual(found, exactSchema)
+    })
+
+    test('mixed priority with different patterns', () => {
+      const registry = new SchemaRegistry()
+      const schema1 = createMockSchema('exact1')
+      const schema2 = createMockSchema('wildcard1')
+      const schema3 = createMockSchema('exact2')
+
+      registry.register(['users', 'alice', 'posts'], schema1)
+      registry.register(['users', '*', 'posts'], schema2)
+      registry.register(['users', 'alice', 'comments'], schema3)
+
+      // Exact match for 'posts'
+      const found1 = registry.getSchema(['users', 'alice', 'posts'])
+      assert.strictEqual(found1, schema1)
+
+      // Exact match for 'comments'
+      const found2 = registry.getSchema(['users', 'alice', 'comments'])
+      assert.strictEqual(found2, schema3)
+
+      // Wildcard match for 'bob'
+      const found3 = registry.getSchema(['users', 'bob', 'posts'])
+      assert.strictEqual(found3, schema2)
     })
   })
 

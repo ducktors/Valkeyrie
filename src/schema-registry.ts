@@ -17,23 +17,77 @@ export class SchemaRegistry {
    * Registers a schema pattern.
    * @param pattern Key pattern with optional '*' wildcards
    * @param schema Standard schema for validation
+   * @throws {Error} If a schema is already registered for this pattern
    */
   register(pattern: Key, schema: StandardSchemaV1): void {
+    // Check if this pattern is already registered
+    for (const entry of this.schemas) {
+      if (this.patternsEqual(entry.pattern, pattern)) {
+        throw new Error(
+          `Schema already registered for pattern [${pattern.join(', ')}]`,
+        )
+      }
+    }
+
     this.schemas.push({ pattern, schema })
   }
 
   /**
+   * Checks if two patterns are equal.
+   * @param pattern1 First pattern
+   * @param pattern2 Second pattern
+   * @returns true if patterns are equal
+   */
+  private patternsEqual(pattern1: Key, pattern2: Key): boolean {
+    if (pattern1.length !== pattern2.length) {
+      return false
+    }
+
+    for (let i = 0; i < pattern1.length; i++) {
+      if (!this.partsEqual(pattern1[i], pattern2[i])) {
+        return false
+      }
+    }
+
+    return true
+  }
+
+  /**
    * Gets a matching schema for the given key.
+   * Exact matches (patterns without wildcards) take priority over wildcard patterns.
    * @param key Key to match against registered patterns
    * @returns The matching schema or null if no match found
    */
   getSchema(key: Key): StandardSchemaV1 | null {
+    // First pass: look for exact matches (no wildcards)
     for (const { pattern, schema } of this.schemas) {
-      if (this.matchPattern(pattern, key)) {
+      if (this.isExactPattern(pattern) && this.matchPattern(pattern, key)) {
         return schema
       }
     }
+
+    // Second pass: look for wildcard matches
+    for (const { pattern, schema } of this.schemas) {
+      if (!this.isExactPattern(pattern) && this.matchPattern(pattern, key)) {
+        return schema
+      }
+    }
+
     return null
+  }
+
+  /**
+   * Checks if a pattern is an exact pattern (contains no wildcards).
+   * @param pattern Pattern to check
+   * @returns true if the pattern contains no wildcards
+   */
+  private isExactPattern(pattern: Key): boolean {
+    for (const part of pattern) {
+      if (part === '*') {
+        return false
+      }
+    }
+    return true
   }
 
   /**

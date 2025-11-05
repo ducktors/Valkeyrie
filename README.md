@@ -33,6 +33,7 @@ This is a work in progress, but the API and everything already implemented is st
 
 - **Simple and intuitive API** - Easy to learn and use
 - **Factory functions** - Create and populate databases from iterables and async sources
+- **Schema validation** - Runtime validation with Zod, Valibot, ArkType, and other Standard Schema libraries
 - **Rich data type support** - Store and retrieve complex data structures
 - **Hierarchical keys** - Organize data with multi-part keys
 - **Atomic operations** - Perform multiple operations in a single transaction
@@ -82,6 +83,31 @@ await db.atomic()
   .sum(['counters', 'visitors'], 1n)
   .commit();
 
+// Schema validation with Zod, Valibot, or ArkType
+import { z } from 'zod';
+
+const userSchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+  age: z.number().min(0)
+});
+
+const db2 = await Valkeyrie
+  .withSchema(['users', '*'], userSchema)
+  .open();
+
+await db2.set(['users', 'alice'], {
+  name: 'Alice',
+  email: 'alice@example.com',
+  age: 30
+}); // ✅ Valid data
+
+// await db2.set(['users', 'bob'], {
+//   name: 'Bob',
+//   email: 'invalid-email',
+//   age: 25
+// }); // ❌ Throws ValidationError
+
 // Create and populate database from existing data
 const users = [
   { id: 1, name: 'Alice', email: 'alice@example.com' },
@@ -89,7 +115,7 @@ const users = [
   { id: 3, name: 'Charlie', email: 'charlie@example.com' }
 ];
 
-const db2 = await Valkeyrie.from(users, {
+const db3 = await Valkeyrie.from(users, {
   prefix: ['users'],
   keyProperty: 'id', // or use a function: (user) => user.email
   path: './users.db' // optional: file path
