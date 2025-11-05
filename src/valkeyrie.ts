@@ -29,6 +29,30 @@ interface ListOptions {
 interface SetOptions {
   expireIn?: number
 }
+
+/**
+ * Options for creating a Valkeyrie database from an iterable.
+ */
+export interface FromOptions<T> {
+  /** Prefix for all keys */
+  prefix: Key
+  /** Property name or function to extract the key part from each item */
+  keyProperty: keyof T | ((item: T) => KeyPart)
+  /** Optional path to the database file (defaults to in-memory) */
+  path?: string
+  /** Optional custom serializer */
+  serializer?: () => Serializer
+  /** Optional destroyOnClose flag (default: false) */
+  destroyOnClose?: boolean
+  /** Optional TTL for all entries (milliseconds) */
+  expireIn?: number
+  /** Optional progress callback */
+  onProgress?: (processed: number, total?: number) => void
+  /** Optional error handling strategy (default: 'stop') */
+  onError?: 'stop' | 'continue'
+  /** Optional callback for errors when onError is 'continue' */
+  onErrorCallback?: (error: Error, item: T) => void
+}
 export interface Check {
   key: Key
   versionstamp: string | null
@@ -100,6 +124,257 @@ export class Valkeyrie {
     )
     await db.cleanup()
     return db
+  }
+
+  /**
+   * Helper function to extract key part from an item
+   */
+  private static extractKeyPart<T>(
+    item: T,
+    keyProperty: keyof T | ((item: T) => KeyPart),
+  ): KeyPart {
+    if (typeof keyProperty === 'function') {
+      return keyProperty(item)
+    }
+    const value = item[keyProperty]
+    // Validate that the extracted value is a valid KeyPart
+    if (
+      value instanceof Uint8Array ||
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'bigint' ||
+      typeof value === 'boolean' ||
+      typeof value === 'symbol'
+    ) {
+      return value
+    }
+    throw new TypeError(
+      `Key property '${String(keyProperty)}' must be a valid KeyPart (Uint8Array, string, number, bigint, boolean, or symbol)`,
+    )
+  }
+
+  /**
+   * Creates and populates a Valkeyrie database from a synchronous iterable.
+   *
+   * @example
+   * ```typescript
+   * const users = [
+   *   { id: 1, name: 'Alice' },
+   *   { id: 2, name: 'Bob' }
+   * ]
+   * const db = await Valkeyrie.from(users, {
+   *   prefix: ['users'],
+   *   keyProperty: 'id'
+   * })
+   * ```
+   *
+   * @param iterable The iterable to populate the database from
+   * @param options Configuration options including prefix and key extraction
+   * @returns A populated Valkeyrie instance
+   */
+  public static async from<T>(
+    iterable: Iterable<T>,
+    options: FromOptions<T>,
+  ): Promise<Valkeyrie> {
+    // Open or create the database
+    const openOptions: {
+      serializer?: () => Serializer
+      destroyOnClose?: boolean
+    } = {}
+    if (options.serializer !== undefined) {
+      openOptions.serializer = options.serializer
+    }
+    if (options.destroyOnClose !== undefined) {
+      openOptions.destroyOnClose = options.destroyOnClose
+    }
+    const db: Valkeyrie = await Valkeyrie.open(options.path, openOptions)
+
+    const {
+      prefix,
+      keyProperty,
+      expireIn,
+      onProgress,
+      onError = 'stop',
+      onErrorCallback,
+    } = options
+
+    // Validate prefix
+    db.validateKeys([prefix] as unknown[])
+
+    const errors: Array<{ error: Error; item: T }> = []
+    let processed = 0
+    let currentBatch: Array<{ key: Key; value: T }> = []
+
+    const BATCH_SIZE = 1000
+
+    const flushBatch = async (): Promise<void> => {
+      if (currentBatch.length === 0) return
+
+      const atomic = db.atomic()
+      for (const { key, value } of currentBatch) {
+        atomic.set(key, value, expireIn ? { expireIn } : {})
+      }
+      await atomic.commit()
+
+      currentBatch = []
+    }
+
+    try {
+      for (const item of iterable) {
+        try {
+          // Extract key part and construct full key
+          const keyPart = Valkeyrie.extractKeyPart(item, keyProperty)
+          const key = [...prefix, keyPart]
+
+          // Add to current batch
+          currentBatch.push({ key, value: item })
+
+          // Flush batch if it reaches the limit
+          if (currentBatch.length >= BATCH_SIZE) {
+            await flushBatch()
+          }
+
+          processed++
+          if (onProgress) {
+            onProgress(processed)
+          }
+        } catch (error) {
+          if (onError === 'stop') {
+            throw error
+          }
+          errors.push({ error: error as Error, item })
+          if (onErrorCallback) {
+            onErrorCallback(error as Error, item)
+          }
+        }
+      }
+
+      // Flush remaining items
+      await flushBatch()
+
+      if (onProgress) {
+        onProgress(processed, processed)
+      }
+
+      return db
+    } catch (error) {
+      // Close and clean up on error
+      await db.close()
+      throw error
+    }
+  }
+
+  /**
+   * Creates and populates a Valkeyrie database from an asynchronous iterable.
+   *
+   * @example
+   * ```typescript
+   * async function* generateUsers() {
+   *   yield { id: 1, name: 'Alice' }
+   *   yield { id: 2, name: 'Bob' }
+   * }
+   *
+   * const db = await Valkeyrie.fromAsync(generateUsers(), {
+   *   prefix: ['users'],
+   *   keyProperty: 'id'
+   * })
+   * ```
+   *
+   * @param iterable The async iterable to populate the database from
+   * @param options Configuration options including prefix and key extraction
+   * @returns A populated Valkeyrie instance
+   */
+  public static async fromAsync<T>(
+    iterable: AsyncIterable<T>,
+    options: FromOptions<T>,
+  ): Promise<Valkeyrie> {
+    // Open or create the database
+    const openOptions: {
+      serializer?: () => Serializer
+      destroyOnClose?: boolean
+    } = {}
+    if (options.serializer !== undefined) {
+      openOptions.serializer = options.serializer
+    }
+    if (options.destroyOnClose !== undefined) {
+      openOptions.destroyOnClose = options.destroyOnClose
+    }
+    const db: Valkeyrie = await Valkeyrie.open(options.path, openOptions)
+
+    const {
+      prefix,
+      keyProperty,
+      expireIn,
+      onProgress,
+      onError = 'stop',
+      onErrorCallback,
+    } = options
+
+    // Validate prefix
+    db.validateKeys([prefix] as unknown[])
+
+    const errors: Array<{ error: Error; item: T }> = []
+    let processed = 0
+    let currentBatch: Array<{ key: Key; value: T }> = []
+
+    const BATCH_SIZE = 1000
+
+    const flushBatch = async (): Promise<void> => {
+      if (currentBatch.length === 0) return
+
+      const atomic = db.atomic()
+      for (const { key, value } of currentBatch) {
+        atomic.set(key, value, expireIn ? { expireIn } : {})
+      }
+      await atomic.commit()
+
+      currentBatch = []
+    }
+
+    try {
+      for await (const item of iterable) {
+        try {
+          // Extract key part and construct full key
+          const keyPart = Valkeyrie.extractKeyPart(item, keyProperty)
+          const key = [...prefix, keyPart]
+
+          // Add to current batch
+          currentBatch.push({ key, value: item })
+
+          // Flush batch if it reaches the limit
+          if (currentBatch.length >= BATCH_SIZE) {
+            await flushBatch()
+          }
+
+          processed++
+          if (onProgress) {
+            // For async iterables, we don't know the total count
+            onProgress(processed)
+          }
+        } catch (error) {
+          if (onError === 'stop') {
+            throw error
+          }
+          errors.push({ error: error as Error, item })
+          if (onErrorCallback) {
+            onErrorCallback(error as Error, item)
+          }
+        }
+      }
+
+      // Flush remaining items
+      await flushBatch()
+
+      if (onProgress) {
+        onProgress(processed, processed)
+      }
+
+      return db
+    } catch (error) {
+      // Close and clean up on error
+      await db.close()
+      throw error
+    }
   }
 
   public async close(): Promise<void> {

@@ -5,6 +5,7 @@
 - [Installation](#installation)
 - [Basic Usage](#basic-usage)
   - [Opening a Database](#opening-a-database)
+  - [Creating and Populating Databases](#creating-and-populating-databases)
   - [Closing a Database](#closing-a-database)
   - [Database Management](#database-management)
   - [Setting Values](#setting-values)
@@ -46,6 +47,7 @@ Valkeyrie is a high-performance key-value store for Node.js applications. It pro
 
 Key features:
 - Simple and intuitive API
+- Factory functions for creating and populating databases from iterables and async sources
 - Support for complex data types (including nested objects, arrays, dates, etc.)
 - Atomic operations with optimistic concurrency control
 - Efficient prefix-based and range-based queries
@@ -78,6 +80,177 @@ const db = await Valkeyrie.open();
 // Or open a persistent database by specifying a file path
 const persistentDb = await Valkeyrie.open('/path/to/database.db');
 ```
+
+### Creating and Populating Databases
+
+Valkeyrie provides factory methods to create and populate databases directly from existing data sources. This is especially useful for data migrations, imports, or seeding databases.
+
+#### Using `Valkeyrie.from()` for Synchronous Data
+
+Create and populate a database from arrays, Sets, Maps, or any iterable:
+
+```typescript
+import { Valkeyrie } from 'valkeyrie';
+
+// From an array of objects
+const products = [
+  { id: 'prod-1', name: 'Laptop', price: 999 },
+  { id: 'prod-2', name: 'Mouse', price: 29 },
+  { id: 'prod-3', name: 'Keyboard', price: 79 }
+];
+
+const db = await Valkeyrie.from(products, {
+  prefix: ['products'],
+  keyProperty: 'id'
+});
+
+// The data is now accessible
+const laptop = await db.get(['products', 'prod-1']);
+console.log(laptop.value); // { id: 'prod-1', name: 'Laptop', price: 999 }
+```
+
+**Using a custom key function:**
+
+```typescript
+// Use email as the key
+const users = [
+  { name: 'Alice', email: 'alice@example.com', age: 30 },
+  { name: 'Bob', email: 'bob@example.com', age: 25 }
+];
+
+const db = await Valkeyrie.from(users, {
+  prefix: ['users', 'by-email'],
+  keyProperty: (user) => user.email
+});
+
+// Access by email
+const alice = await db.get(['users', 'by-email', 'alice@example.com']);
+```
+
+**Advanced options:**
+
+```typescript
+const db = await Valkeyrie.from(data, {
+  prefix: ['cache'],
+  keyProperty: 'id',
+  path: './cache.db',              // Persist to file
+  expireIn: 3600000,                // All entries expire in 1 hour
+  serializer: jsonSerializer,       // Use JSON serialization
+  onProgress: (processed, total) => {
+    console.log(`Progress: ${processed}/${total}`);
+  },
+  onError: 'continue',              // Don't stop on errors
+  onErrorCallback: (error, item) => {
+    console.error('Failed to import:', item, error);
+  }
+});
+```
+
+#### Using `Valkeyrie.fromAsync()` for Async Data
+
+Create and populate a database from async generators, streams, or async iterables:
+
+```typescript
+// From an async generator (e.g., fetching paginated API data)
+async function* fetchAllUsers() {
+  let page = 1;
+  while (true) {
+    const response = await fetch(`/api/users?page=${page}`);
+    const data = await response.json();
+
+    if (data.users.length === 0) break;
+
+    for (const user of data.users) {
+      yield user;
+    }
+
+    page++;
+  }
+}
+
+const db = await Valkeyrie.fromAsync(fetchAllUsers(), {
+  prefix: ['users'],
+  keyProperty: 'id',
+  onProgress: (processed) => {
+    console.log(`Imported ${processed} users so far...`);
+  }
+});
+```
+
+**From Node.js streams:**
+
+```typescript
+import { createReadStream } from 'fs';
+import { parse } from 'csv-parse';
+import { Readable } from 'stream';
+
+// Parse CSV and import to database
+const stream = createReadStream('./users.csv')
+  .pipe(parse({ columns: true, skip_empty_lines: true }));
+
+const db = await Valkeyrie.fromAsync(Readable.from(stream), {
+  prefix: ['users'],
+  keyProperty: 'id',
+  path: './users.db'
+});
+```
+
+**Processing large datasets with progress tracking:**
+
+```typescript
+async function* processLargeDataset() {
+  const batchSize = 100;
+  let offset = 0;
+
+  while (true) {
+    const batch = await fetchDataBatch(offset, batchSize);
+    if (batch.length === 0) break;
+
+    for (const item of batch) {
+      // Transform data before inserting
+      yield {
+        id: item.id,
+        data: await processItem(item),
+        timestamp: Date.now()
+      };
+    }
+
+    offset += batchSize;
+  }
+}
+
+const db = await Valkeyrie.fromAsync(processLargeDataset(), {
+  prefix: ['processed'],
+  keyProperty: 'id',
+  expireIn: 86400000, // 24 hours TTL
+  onProgress: (processed) => {
+    if (processed % 1000 === 0) {
+      console.log(`Processed ${processed} items`);
+    }
+  }
+});
+```
+
+#### Factory Method Options Reference
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `prefix` | `Key` | **Yes** | Key prefix for all entries (e.g., `['users']`) |
+| `keyProperty` | `keyof T \| (item: T) => KeyPart` | **Yes** | Property name (e.g., `'id'`) or function to extract key part |
+| `path` | `string` | No | Database file path. If omitted, creates in-memory database |
+| `serializer` | `() => Serializer` | No | Custom serializer (default: v8 serializer) |
+| `destroyOnClose` | `boolean` | No | Destroy database file on close (default: `false`) |
+| `expireIn` | `number` | No | TTL for all entries in milliseconds |
+| `onProgress` | `(processed: number, total?: number) => void` | No | Progress callback. `total` is provided for sync iterables when size is known |
+| `onError` | `'stop' \| 'continue'` | No | Error handling strategy (default: `'stop'`) |
+| `onErrorCallback` | `(error: Error, item: T) => void` | No | Called for each error when `onError: 'continue'` |
+
+**Performance characteristics:**
+
+- Automatically batches inserts into chunks of 1000 items
+- Each chunk is inserted atomically for consistency
+- Handles datasets of millions of items efficiently
+- Memory efficient for async iterables (processes items as they arrive)
 
 ### Closing a Database
 
