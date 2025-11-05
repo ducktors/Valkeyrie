@@ -1,8 +1,18 @@
 import { serialize } from 'node:v8'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { Driver } from './driver.js'
 import { KvU64 } from './kv-u64.js'
+import type { SchemaRegistry } from './schema-registry.js'
 import type { Serializer } from './serializers/serializer.js'
 import { sqliteDriver } from './sqlite-driver.js'
+import {
+  kCommitVersionstamp,
+  kFrom,
+  kFromAsync,
+  kOpen,
+  kValkeyrie,
+} from './symbols.js'
+import { ValkeyrieBuilder } from './valkeyrie-builder.js'
 
 export type KeyPart = Uint8Array | string | number | bigint | boolean | symbol
 export type Key = KeyPart[]
@@ -79,28 +89,46 @@ export type EntryMaybe<T = unknown> =
       versionstamp: null
     }
 
-const valkeyrieSymbol = Symbol('Valkeyrie')
-const commitVersionstampSymbol = Symbol('ValkeyrieCommitVersionstamp')
 export class Valkeyrie {
   #driver: Driver
   #isClosed = false
   #destroyOnClose = false
+  // @ts-expect-error - Schema registry is stored for future validation feature
+  readonly #schemaRegistry?: SchemaRegistry
+
   private constructor(
     functions: Driver,
-    options: { destroyOnClose: boolean },
+    options: { destroyOnClose: boolean; schemaRegistry?: SchemaRegistry },
     symbol?: symbol,
   ) {
-    if (valkeyrieSymbol !== symbol) {
+    if (kValkeyrie !== symbol) {
       throw new TypeError(
         'Valkeyrie can not be constructed: use Valkeyrie.open() to create a new instance',
       )
     }
     this.#driver = functions
     this.#destroyOnClose = options.destroyOnClose
+
+    if (options.schemaRegistry !== undefined) {
+      this.#schemaRegistry = options.schemaRegistry
+    }
   }
 
   commitVersionstamp(): symbol {
-    return commitVersionstampSymbol
+    return kCommitVersionstamp
+  }
+
+  /**
+   * Creates a builder for registering schemas before opening the database.
+   * @param pattern Key pattern with optional '*' wildcards
+   * @param schema Standard schema for validation
+   * @returns A builder instance for chaining
+   */
+  public static withSchema(
+    pattern: Key,
+    schema: StandardSchemaV1,
+  ): ValkeyrieBuilder {
+    return new ValkeyrieBuilder().withSchema(pattern, schema)
   }
 
   /**
@@ -116,11 +144,35 @@ export class Valkeyrie {
       destroyOnClose?: boolean
     } = {},
   ): Promise<Valkeyrie> {
+    return Valkeyrie[kOpen](path, options, undefined)
+  }
+
+  /**
+   * Internal method to open a database with schemas.
+   * Used by ValkeyrieBuilder.
+   */
+  static async [kOpen](
+    path?: string,
+    options: {
+      serializer?: () => Serializer
+      destroyOnClose?: boolean
+    } = {},
+    schemaRegistry?: SchemaRegistry,
+  ): Promise<Valkeyrie> {
     const destroyOnClose = options.destroyOnClose ?? false
+    const constructorOptions: {
+      destroyOnClose: boolean
+      schemaRegistry?: SchemaRegistry
+    } = {
+      destroyOnClose,
+    }
+    if (schemaRegistry !== undefined) {
+      constructorOptions.schemaRegistry = schemaRegistry
+    }
     const db = new Valkeyrie(
       await sqliteDriver(path, options.serializer),
-      { destroyOnClose },
-      valkeyrieSymbol,
+      constructorOptions,
+      kValkeyrie,
     )
     await db.cleanup()
     return db
@@ -176,6 +228,18 @@ export class Valkeyrie {
     iterable: Iterable<T>,
     options: FromOptions<T>,
   ): Promise<Valkeyrie> {
+    return Valkeyrie[kFrom](iterable, options, undefined)
+  }
+
+  /**
+   * Internal method to create and populate a database with schemas.
+   * Used by ValkeyrieBuilder.
+   */
+  static async [kFrom]<T>(
+    iterable: Iterable<T>,
+    options: FromOptions<T>,
+    schemaRegistry?: SchemaRegistry,
+  ): Promise<Valkeyrie> {
     // Open or create the database
     const openOptions: {
       serializer?: () => Serializer
@@ -187,7 +251,11 @@ export class Valkeyrie {
     if (options.destroyOnClose !== undefined) {
       openOptions.destroyOnClose = options.destroyOnClose
     }
-    const db: Valkeyrie = await Valkeyrie.open(options.path, openOptions)
+    const db: Valkeyrie = await Valkeyrie[kOpen](
+      options.path,
+      openOptions,
+      schemaRegistry,
+    )
 
     const {
       prefix,
@@ -288,6 +356,18 @@ export class Valkeyrie {
     iterable: AsyncIterable<T>,
     options: FromOptions<T>,
   ): Promise<Valkeyrie> {
+    return Valkeyrie[kFromAsync](iterable, options, undefined)
+  }
+
+  /**
+   * Internal method to create and populate a database with schemas from async iterable.
+   * Used by ValkeyrieBuilder.
+   */
+  static async [kFromAsync]<T>(
+    iterable: AsyncIterable<T>,
+    options: FromOptions<T>,
+    schemaRegistry?: SchemaRegistry,
+  ): Promise<Valkeyrie> {
     // Open or create the database
     const openOptions: {
       serializer?: () => Serializer
@@ -299,7 +379,11 @@ export class Valkeyrie {
     if (options.destroyOnClose !== undefined) {
       openOptions.destroyOnClose = options.destroyOnClose
     }
-    const db: Valkeyrie = await Valkeyrie.open(options.path, openOptions)
+    const db: Valkeyrie = await Valkeyrie[kOpen](
+      options.path,
+      openOptions,
+      schemaRegistry,
+    )
 
     const {
       prefix,

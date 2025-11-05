@@ -6,7 +6,9 @@ import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { setTimeout } from 'node:timers/promises'
 import { inspect } from 'node:util'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 import { KvU64 } from '../src/kv-u64.js'
+import { ValkeyrieBuilder } from '../src/valkeyrie-builder.js'
 import {
   AtomicOperation,
   type EntryMaybe,
@@ -2394,7 +2396,7 @@ describe('test valkeyrie', async () => {
     const db = await Valkeyrie.fromAsync(generateItems(), {
       prefix: ['async-progress'],
       keyProperty: 'id',
-      onProgress: (processed, total) => {
+      onProgress: (processed) => {
         progressUpdates.push(processed)
         // For async iterables, total is undefined until the end
       },
@@ -2440,15 +2442,9 @@ describe('test valkeyrie', async () => {
   })
 
   await test('from() with different key types', async () => {
-    const items = [
-      { key: 'string-key', value: 1 },
-      { key: 42, value: 2 },
-      { key: true, value: 3 },
-      { key: 100n, value: 4 },
-    ]
-
     // Test with string keys
-    const db1 = await Valkeyrie.from([items[0]], {
+    const stringItems = [{ key: 'string-key', value: 1 }]
+    const db1 = await Valkeyrie.from(stringItems, {
       prefix: ['keys'],
       keyProperty: 'key',
     })
@@ -2460,7 +2456,8 @@ describe('test valkeyrie', async () => {
     }
 
     // Test with number keys
-    const db2 = await Valkeyrie.from([items[1]], {
+    const numberItems = [{ key: 42, value: 2 }]
+    const db2 = await Valkeyrie.from(numberItems, {
       prefix: ['keys'],
       keyProperty: 'key',
     })
@@ -2472,7 +2469,8 @@ describe('test valkeyrie', async () => {
     }
 
     // Test with boolean keys
-    const db3 = await Valkeyrie.from([items[2]], {
+    const booleanItems = [{ key: true, value: 3 }]
+    const db3 = await Valkeyrie.from(booleanItems, {
       prefix: ['keys'],
       keyProperty: 'key',
     })
@@ -2484,7 +2482,8 @@ describe('test valkeyrie', async () => {
     }
 
     // Test with bigint keys
-    const db4 = await Valkeyrie.from([items[3]], {
+    const bigintItems = [{ key: 100n, value: 4 }]
+    const db4 = await Valkeyrie.from(bigintItems, {
       prefix: ['keys'],
       keyProperty: 'key',
     })
@@ -2523,6 +2522,273 @@ describe('test valkeyrie', async () => {
     try {
       const item = await db.get(['app', 'data', 'users', 1])
       assert.deepEqual(item.value, { id: 1, value: 'nested' })
+    } finally {
+      await db.close()
+    }
+  })
+
+  // Mock schema helper for testing
+  const createMockSchema = (name: string): StandardSchemaV1 =>
+    ({
+      '~standard': {
+        version: 1,
+        vendor: 'test',
+        validate: (value: unknown) => ({
+          value,
+          issues: undefined,
+        }),
+      },
+      _name: name,
+    }) as unknown as StandardSchemaV1
+
+  await test('withSchema() returns ValkeyrieBuilder', async () => {
+    const schema = createMockSchema('user')
+
+    const builder = Valkeyrie.withSchema(['users', '*'], schema)
+
+    assert.ok(builder instanceof ValkeyrieBuilder)
+  })
+
+  await test('withSchema() can be chained with open()', async () => {
+    const schema = createMockSchema('user')
+
+    const db = await Valkeyrie.withSchema(['users', '*'], schema).open()
+
+    try {
+      assert.ok(db instanceof Valkeyrie)
+    } finally {
+      await db.close()
+    }
+  })
+
+  await test('withSchema() can be chained with from()', async () => {
+    const schema = createMockSchema('user')
+    const users = [
+      { id: 1, name: 'Alice' },
+      { id: 2, name: 'Bob' },
+    ]
+
+    const db = await Valkeyrie.withSchema(['users', '*'], schema).from(users, {
+      prefix: ['users'],
+      keyProperty: 'id',
+    })
+
+    try {
+      assert.ok(db instanceof Valkeyrie)
+      const alice = await db.get(['users', 1])
+      assert.deepEqual(alice.value, { id: 1, name: 'Alice' })
+    } finally {
+      await db.close()
+    }
+  })
+
+  await test('withSchema() can be chained with fromAsync()', async () => {
+    const schema = createMockSchema('user')
+
+    async function* generateUsers() {
+      yield { id: 1, name: 'Alice' }
+      yield { id: 2, name: 'Bob' }
+    }
+
+    const db = await Valkeyrie.withSchema(['users', '*'], schema).fromAsync(
+      generateUsers(),
+      {
+        prefix: ['users'],
+        keyProperty: 'id',
+      },
+    )
+
+    try {
+      assert.ok(db instanceof Valkeyrie)
+      const bob = await db.get(['users', 2])
+      assert.deepEqual(bob.value, { id: 2, name: 'Bob' })
+    } finally {
+      await db.close()
+    }
+  })
+
+  await test('withSchema() supports multiple schema registrations', async () => {
+    const userSchema = createMockSchema('user')
+    const postSchema = createMockSchema('post')
+
+    const db = await Valkeyrie.withSchema(['users', '*'], userSchema)
+      .withSchema(['posts', '*'], postSchema)
+      .open()
+
+    try {
+      assert.ok(db instanceof Valkeyrie)
+      // Just verify the database was created successfully
+      // Schema validation testing is in valkeyrie-builder tests
+    } finally {
+      await db.close()
+    }
+  })
+
+  await test('from() with invalid key extraction throws error', async () => {
+    const items = [{ name: 'Alice' }] // no 'id' property
+
+    await assert.rejects(
+      async () => {
+        await Valkeyrie.from(items, {
+          prefix: ['users'],
+          keyProperty: 'id' as keyof { name: string },
+        })
+      },
+      {
+        name: 'TypeError',
+        message: /Key property 'id' must be a valid KeyPart/,
+      },
+    )
+  })
+
+  await test('from() with invalid key type throws error', async () => {
+    const items = [{ id: { nested: 'object' } }] // object is not a valid KeyPart
+
+    await assert.rejects(
+      async () => {
+        await Valkeyrie.from(items, {
+          prefix: ['users'],
+          keyProperty: 'id',
+        })
+      },
+      {
+        name: 'TypeError',
+        message: /Key property 'id' must be a valid KeyPart/,
+      },
+    )
+  })
+
+  await test('fromAsync() with error handling - stop on error', async () => {
+    async function* generate() {
+      yield { id: 1, value: 'ok' }
+      yield { id: { bad: 'object' }, value: 'bad' } // Invalid key type
+      yield { id: 3, value: 'never' }
+    }
+
+    await assert.rejects(
+      async () => {
+        await Valkeyrie.fromAsync(generate(), {
+          prefix: ['items'],
+          keyProperty: 'id',
+          onError: 'stop', // This is the default
+        })
+      },
+      {
+        name: 'TypeError',
+      },
+    )
+  })
+
+  await test('fromAsync() with error handling - continue on error', async () => {
+    const errors: Array<{ error: Error; item: unknown }> = []
+
+    async function* generate() {
+      yield { id: 1, value: 'ok' }
+      yield { id: { bad: 'object' }, value: 'bad' } // Invalid key type
+      yield { id: 3, value: 'also ok' }
+    }
+
+    const db = await Valkeyrie.fromAsync(generate(), {
+      prefix: ['items'],
+      keyProperty: 'id',
+      onError: 'continue',
+      onErrorCallback: (error, item) => {
+        errors.push({ error, item })
+      },
+    })
+
+    try {
+      // First and third items should be inserted
+      const item1 = await db.get(['items', 1])
+      assert.deepEqual(item1.value, { id: 1, value: 'ok' })
+
+      const item3 = await db.get(['items', 3])
+      assert.deepEqual(item3.value, { id: 3, value: 'also ok' })
+
+      // Error callback should have been called once for the invalid item
+      assert.strictEqual(errors.length, 1)
+      assert.ok(errors[0]?.error instanceof TypeError)
+      assert.deepEqual(errors[0]?.item, { id: { bad: 'object' }, value: 'bad' })
+    } finally {
+      await db.close()
+    }
+  })
+
+  await test('fromAsync() with expireIn option', async () => {
+    async function* generate() {
+      yield { id: 1, value: 'expires soon' }
+    }
+
+    const db = await Valkeyrie.fromAsync(generate(), {
+      prefix: ['temp'],
+      keyProperty: 'id',
+      expireIn: 100, // 100ms TTL
+    })
+
+    try {
+      // Item should exist immediately
+      const item1 = await db.get(['temp', 1])
+      assert.deepEqual(item1.value, { id: 1, value: 'expires soon' })
+
+      // Wait for expiration
+      await setTimeout(150)
+
+      // Trigger cleanup
+      await db.cleanup()
+
+      // Item should be gone
+      const item2 = await db.get(['temp', 1])
+      assert.strictEqual(item2.value, null)
+    } finally {
+      await db.close()
+    }
+  })
+
+  await test('from() with destroyOnClose option', async () => {
+    const items = [{ id: 1, value: 'test' }]
+    const dbPath = join(tmpdir(), `valkeyrie-test-${randomUUID()}.db`)
+
+    const db = await Valkeyrie.from(items, {
+      prefix: ['items'],
+      keyProperty: 'id',
+      path: dbPath,
+      destroyOnClose: true,
+    })
+
+    // Verify file exists
+    await access(dbPath)
+
+    await db.close()
+
+    // File should be deleted after close
+    await assert.rejects(
+      async () => {
+        await access(dbPath)
+      },
+      {
+        code: 'ENOENT',
+      },
+    )
+  })
+
+  await test('fromAsync() with empty async iterable', async () => {
+    async function* generate() {
+      // Empty generator
+    }
+
+    const db = await Valkeyrie.fromAsync(generate(), {
+      prefix: ['empty'],
+      keyProperty: 'id',
+    })
+
+    try {
+      assert.ok(db instanceof Valkeyrie)
+      // Database should be empty
+      const items = []
+      for await (const item of db.list({ prefix: ['empty'] })) {
+        items.push(item)
+      }
+      assert.strictEqual(items.length, 0)
     } finally {
       await db.close()
     }

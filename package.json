@@ -138,5 +138,8 @@
     "msgpackr": {
       "optional": true
     }
+  },
+  "dependencies": {
+    "@standard-schema/spec": "^1.0.0"
   }
 }
