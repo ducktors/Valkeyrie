@@ -144,5 +144,11 @@
   },
   "dependencies": {
     "@standard-schema/spec": "^1.0.0"
+  },
+  "c8": {
+    "exclude": [
+      "src/types/**",
+      "test/**"
+    ]
   }
 }
