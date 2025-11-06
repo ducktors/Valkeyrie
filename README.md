@@ -16,14 +16,11 @@ This is a work in progress, but the API and everything already implemented is st
 
 - [Features](#features)
 - [Installation](#installation)
-- [Building from Source](#building-from-source)
 - [Quick Start](#quick-start)
-- [Key Concepts](#key-concepts)
-  - [Creating and Populating Databases](#creating-and-populating-databases)
+- [Core Concepts](#core-concepts)
   - [Hierarchical Keys](#hierarchical-keys)
   - [Value Types](#value-types)
-  - [Atomic Operations](#atomic-operations)
-  - [Serializers](#serializers)
+  - [Basic Operations](#basic-operations)
 - [Documentation](#documentation)
 - [Contributing](#contributing)
 - [Benchmarks](#benchmarks)
@@ -31,16 +28,18 @@ This is a work in progress, but the API and everything already implemented is st
 
 ## Features
 
-- **Simple and intuitive API** - Easy to learn and use
-- **Factory functions** - Create and populate databases from iterables and async sources
+- **Simple and intuitive API** - Easy to learn and use, inspired by Deno.kv
+- **Type-safe** - Full TypeScript support with schema-based type inference
+- **Factory functions** - Create and populate databases from arrays, iterables, and async sources
 - **Schema validation** - Runtime validation with Zod, Valibot, ArkType, and other Standard Schema libraries
-- **Rich data type support** - Store and retrieve complex data structures
-- **Hierarchical keys** - Organize data with multi-part keys
-- **Atomic operations** - Perform multiple operations in a single transaction
+- **Rich data type support** - Store objects, arrays, dates, binary data, and more
+- **Hierarchical keys** - Organize data with multi-part keys for efficient querying
+- **Atomic operations** - Perform multiple operations in a single transaction with optimistic locking
+- **Real-time updates** - Watch keys for changes with the `watch()` API
 - **Efficient querying** - List data with prefix and range queries
-- **Data expiration** - Set time-to-live for values
-- **High performance** - Built on SQLite with optimized operations
-- **Specialized numeric type** - 64-bit unsigned integers for counters
+- **Data expiration** - Set time-to-live for values with automatic cleanup
+- **High performance** - Built on SQLite with optimized operations and multiple serializer options
+- **Multi-instance safe** - Proper concurrency control for multiple process access
 
 ## Installation
 
@@ -58,247 +57,138 @@ yarn add valkeyrie
 ## Quick Start
 
 ```typescript
-import { Valkeyrie, KvU64 } from 'valkeyrie';
+import { Valkeyrie } from 'valkeyrie';
 
-// Open a database
-const db = await Valkeyrie.open();
+// Open a database (in-memory or file-based)
+const db = await Valkeyrie.open('./my-database.db');
 
-// Store values
-await db.set(['users', 'user1'], { name: 'John Doe', age: 30 });
-await db.set(['counters', 'visitors'], new KvU64(1000n));
+// Store and retrieve data
+await db.set(['users', 'alice'], {
+  name: 'Alice',
+  email: 'alice@example.com',
+  age: 30
+});
 
-// Retrieve values
-const user = await db.get(['users', 'user1']);
-console.log(user.value); // { name: 'John Doe', age: 30 }
+const user = await db.get(['users', 'alice']);
+console.log(user.value);
+// { name: 'Alice', email: 'alice@example.com', age: 30 }
 
-// List values with a common prefix
+// List all users
 for await (const entry of db.list({ prefix: ['users'] })) {
   console.log(entry.key, entry.value);
 }
 
-// Perform atomic operations
-await db.atomic()
-  .check({ key: ['users', 'user1'], versionstamp: user.versionstamp })
-  .set(['users', 'user1'], { ...user.value, lastLogin: new Date() })
-  .sum(['counters', 'visitors'], 1n)
-  .commit();
-
-// Schema validation with Zod, Valibot, or ArkType
-import { z } from 'zod';
-
-const userSchema = z.object({
-  name: z.string(),
-  email: z.string().email(),
-  age: z.number().min(0)
-});
-
-const db2 = await Valkeyrie
-  .withSchema(['users', '*'], userSchema)
-  .open();
-
-await db2.set(['users', 'alice'], {
-  name: 'Alice',
-  email: 'alice@example.com',
-  age: 30
-}); // ✅ Valid data
-
-// await db2.set(['users', 'bob'], {
-//   name: 'Bob',
-//   email: 'invalid-email',
-//   age: 25
-// }); // ❌ Throws ValidationError
-
-// Create and populate database from existing data
-const users = [
-  { id: 1, name: 'Alice', email: 'alice@example.com' },
-  { id: 2, name: 'Bob', email: 'bob@example.com' },
-  { id: 3, name: 'Charlie', email: 'charlie@example.com' }
-];
-
-const db3 = await Valkeyrie.from(users, {
-  prefix: ['users'],
-  keyProperty: 'id', // or use a function: (user) => user.email
-  path: './users.db' // optional: file path
-});
-
-// Database management
-// Clear all data but keep the database file
-await db.clear();
-// Or completely destroy the database (deletes the file)
-// await db.destroy();
-
-// Close the database when done
+// Close when done
 await db.close();
 ```
 
-## Key Concepts
+That's it! You now have a working key-value store. For more examples, see the sections below or check out the [complete documentation](./docs/guides/getting-started.md).
 
-### Creating and Populating Databases
+## Core Concepts
 
-Valkeyrie provides convenient factory methods to create and populate databases from existing data:
-
-#### `Valkeyrie.from()` - Synchronous Iterables
-
-Create a database from arrays, Sets, Maps, or any iterable:
+### Opening a Database
 
 ```typescript
-import { Valkeyrie } from 'valkeyrie';
+// In-memory database (lost when closed)
+const db = await Valkeyrie.open();
 
-// From an array of objects
-const users = [
-  { id: 1, name: 'Alice', role: 'admin' },
-  { id: 2, name: 'Bob', role: 'user' },
-  { id: 3, name: 'Charlie', role: 'user' }
-];
+// File-based database (persisted to disk)
+const db = await Valkeyrie.open('./my-app.db');
 
-const db = await Valkeyrie.from(users, {
-  prefix: ['users'],           // Key prefix for all entries
-  keyProperty: 'id'             // Property to use as key
-});
-
-// Access the data
-const alice = await db.get(['users', 1]);
-console.log(alice.value); // { id: 1, name: 'Alice', role: 'admin' }
-
-// Using a custom key function
-const db2 = await Valkeyrie.from(users, {
-  prefix: ['users', 'by-name'],
-  keyProperty: (user) => user.name.toLowerCase()
-});
-
-// With additional options
-const db3 = await Valkeyrie.from(users, {
-  prefix: ['users'],
-  keyProperty: 'id',
-  path: './users.db',           // Save to file
-  expireIn: 86400000,           // TTL: 24 hours
-  onProgress: (processed, total) => {
-    console.log(`Processed ${processed}/${total} items`);
-  }
-});
+// With automatic cleanup on close
+const db = await Valkeyrie.open('./temp.db', { destroyOnClose: true });
 ```
-
-#### `Valkeyrie.fromAsync()` - Async Iterables
-
-Create a database from async generators or async iterables:
-
-```typescript
-// From an async generator
-async function* fetchUsers() {
-  for (let page = 1; page <= 10; page++) {
-    const response = await fetch(`/api/users?page=${page}`);
-    const users = await response.json();
-    for (const user of users) {
-      yield user;
-    }
-  }
-}
-
-const db = await Valkeyrie.fromAsync(fetchUsers(), {
-  prefix: ['users'],
-  keyProperty: 'id',
-  onProgress: (processed) => {
-    console.log(`Imported ${processed} users...`);
-  }
-});
-
-// From a stream
-import { Readable } from 'stream';
-
-const stream = Readable.from(largeDataset);
-const db2 = await Valkeyrie.fromAsync(stream, {
-  prefix: ['data'],
-  keyProperty: 'id'
-});
-```
-
-#### Factory Options
-
-Both `from()` and `fromAsync()` support the following options:
-
-| Option | Type | Required | Description |
-|--------|------|----------|-------------|
-| `prefix` | `Key` | ✅ | Key prefix for all entries |
-| `keyProperty` | `keyof T \| (item: T) => KeyPart` | ✅ | Property name or function to extract key |
-| `path` | `string` | ❌ | Database file path (default: in-memory) |
-| `serializer` | `() => Serializer` | ❌ | Custom serializer |
-| `destroyOnClose` | `boolean` | ❌ | Destroy database on close (default: false) |
-| `expireIn` | `number` | ❌ | TTL for all entries in milliseconds |
-| `onProgress` | `(processed, total?) => void` | ❌ | Progress callback |
-| `onError` | `'stop' \| 'continue'` | ❌ | Error handling strategy (default: 'stop') |
-| `onErrorCallback` | `(error, item) => void` | ❌ | Called for each error when `onError: 'continue'` |
-
-**Performance Notes:**
-- Automatically batches inserts in chunks of 1000 items using atomic operations
-- Handles datasets of any size efficiently
-- Progress callbacks receive `total` parameter for sync iterables (when size is known)
 
 ### Hierarchical Keys
 
-Keys in Valkeyrie are arrays of parts, allowing for hierarchical organization:
+Keys in Valkeyrie are arrays that create a hierarchy, similar to file paths:
 
 ```typescript
-// User data
-await db.set(['users', 'user1', 'profile'], { ... });
-await db.set(['users', 'user1', 'settings'], { ... });
+// Organize data hierarchically
+await db.set(['users', 'alice', 'profile'], { name: 'Alice', bio: '...' });
+await db.set(['users', 'alice', 'settings'], { theme: 'dark' });
+await db.set(['users', 'bob', 'profile'], { name: 'Bob', bio: '...' });
+
+// List all of Alice's data
+for await (const entry of db.list({ prefix: ['users', 'alice'] })) {
+  console.log(entry.key); // ['users', 'alice', 'profile'], ['users', 'alice', 'settings']
+}
+
+// Key parts can be strings, numbers, booleans, bigints, or Uint8Array
+await db.set(['products', 42, 'name'], 'Laptop');
+await db.set(['active', true, 'users'], ['alice', 'bob']);
 ```
 
 ### Value Types
 
-Valkeyrie supports a wide range of value types:
-
-- Primitive types: string, number, boolean, bigint, null, undefined
-- Binary data: Uint8Array, ArrayBuffer
-- Complex types: objects, arrays, Map, Set
-- Date objects, RegExp objects
-- KvU64 (specialized 64-bit unsigned integer)
-
-> **Important Note**: KvU64 instances can only be used as top-level values, not nested within objects or arrays.
-
-### Atomic Operations
-
-Perform multiple operations atomically with optimistic concurrency control:
+Store any JavaScript data type:
 
 ```typescript
-await db.atomic()
-  .set(['users', 'user1'], { name: 'John' })
-  .set(['users', 'user2'], { name: 'Jane' })
-  .delete(['users', 'user3'])
-  .commit();
+// Primitives
+await db.set(['string'], 'hello');
+await db.set(['number'], 42);
+await db.set(['boolean'], true);
+await db.set(['bigint'], 123456789n);
+await db.set(['null'], null);
+
+// Complex types
+await db.set(['object'], { name: 'Alice', age: 30 });
+await db.set(['array'], [1, 2, 3]);
+await db.set(['date'], new Date());
+await db.set(['map'], new Map([['a', 1], ['b', 2]]));
+await db.set(['set'], new Set([1, 2, 3]));
+await db.set(['buffer'], new Uint8Array([1, 2, 3]));
 ```
 
-### Serializers
-
-Valkeyrie supports pluggable serializers that allow you to customize how values are stored in the database:
-
-- **V8 Serializer (Default)** - Uses Node.js's built-in `node:v8` module for efficient binary serialization
-- **JSON Serializer** - Human-readable format compatible with other programming languages
-- **BSON Serializer** - Uses MongoDB's BSON format for efficient binary serialization
-- **MessagePack Serializer** - Uses the msgpackr library for compact binary serialization
-- **CBOR-X Serializer** - Uses the cbor-x library for high-performance CBOR serialization
-- **Custom Serializers** - Create your own serializers for specialized needs like compression or encryption
+### Basic Operations
 
 ```typescript
-import { Valkeyrie } from 'valkeyrie';
-import { bsonSerializer } from 'valkeyrie/serializers/bson';
-import { cborXSerializer } from 'valkeyrie/serializers/cbor-x';
+// Set a value
+await db.set(['key'], 'value');
 
-// Using the BSON serializer
-const dbBson = await Valkeyrie.open('./data.db', {
-  serializer: bsonSerializer
-});
+// Set with expiration (60 seconds)
+await db.set(['session', 'token'], 'abc123', { expireIn: 60_000 });
 
-// Using the CBOR-X serializer
-const dbCbor = await Valkeyrie.open('./cbor-data.db', {
-  serializer: cborXSerializer
-});
+// Get a value
+const entry = await db.get(['key']);
+console.log(entry.value); // 'value'
+console.log(entry.versionstamp); // Version identifier
+
+// Get multiple values at once
+const entries = await db.getMany([
+  ['users', 'alice'],
+  ['users', 'bob']
+]);
+
+// Delete a value
+await db.delete(['key']);
+
+// List with prefix
+for await (const entry of db.list({ prefix: ['users'] })) {
+  console.log(entry.key, entry.value);
+}
+
+// Clear all data
+await db.clear();
+
+// Destroy database (deletes file)
+await db.destroy();
 ```
-
-For detailed information about serializers, see the [Serializers section in the documentation](./docs/documentation.md#serializer-comparison).
 
 ## Documentation
 
-For complete documentation, see [Documentation](./docs/documentation.md).
+### Guides
+
+- **[Getting Started](./docs/guides/getting-started.md)** - Complete beginner's guide with examples
+- **[Schema Validation](./docs/guides/schema-validation.md)** - Type-safe operations with Zod, Valibot, and ArkType
+- **[Factory Methods](./docs/guides/factory-methods.md)** - Create and populate databases from data sources
+- **[Serializers](./docs/guides/serializers.md)** - Choose and configure the right serializer
+- **[Advanced Patterns](./docs/guides/advanced-patterns.md)** - Atomic operations, watch API, and real-world patterns
+
+### API Reference
+
+- **[API Reference](./docs/api/api-reference.md)** - Complete API documentation
+- **[Types](./docs/api/types.md)** - TypeScript types and interfaces
 
 ## Contributing
 
