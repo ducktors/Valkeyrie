@@ -774,15 +774,15 @@ export class Valkeyrie<TRegistry extends SchemaRegistryType = readonly []> {
    * @param keys - Array of keys to retrieve
    * @returns Array of entries with values or nulls
    */
-  public async getMany<T = unknown>(
-    keys: Key[],
-  ): Promise<EntryMaybe<T>[]> {
+  public async getMany<T = unknown>(keys: Key[]): Promise<EntryMaybe<T>[]> {
     this.throwIfClosed()
     this.validateKeys(keys)
     if (keys.length > 10) {
       throw new TypeError('Too many ranges (max 10)')
     }
-    return Promise.all(keys.map((key) => this.get(key))) as Promise<EntryMaybe<T>[]>
+    return Promise.all(keys.map((key) => this.get(key))) as Promise<
+      EntryMaybe<T>[]
+    >
   }
 
   /**
@@ -1078,9 +1078,15 @@ export class Valkeyrie<TRegistry extends SchemaRegistryType = readonly []> {
 
   // Overload for prefix-based selectors with type inference
   public list<const TPrefix extends Key>(
-    selector: { prefix: TPrefix } | { prefix: TPrefix; start: Key } | { prefix: TPrefix; end: Key },
+    selector:
+      | { prefix: TPrefix }
+      | { prefix: TPrefix; start: Key }
+      | { prefix: TPrefix; end: Key },
     options?: ListOptions,
-  ): AsyncIterableIterator<Entry<InferTypeForPrefix<TRegistry, TPrefix>>, void> & {
+  ): AsyncIterableIterator<
+    Entry<InferTypeForPrefix<TRegistry, TPrefix>>,
+    void
+  > & {
     readonly cursor: string
     [Symbol.asyncDispose](): Promise<void>
   }
@@ -1326,7 +1332,9 @@ export class Valkeyrie<TRegistry extends SchemaRegistryType = readonly []> {
 }
 
 // Internal class - not exported
-export class AtomicOperation<TRegistry extends SchemaRegistryType = readonly []> {
+export class AtomicOperation<
+  TRegistry extends SchemaRegistryType = readonly [],
+> {
   private checks: Check[] = []
   private mutations: Mutation[] = []
   private valkeyrie: Valkeyrie<TRegistry>

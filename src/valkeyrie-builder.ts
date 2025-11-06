@@ -3,8 +3,8 @@ import { SchemaRegistry } from './schema-registry.js'
 import type { Serializer } from './serializers/serializer.js'
 import { kFrom, kFromAsync, kOpen } from './symbols.js'
 import type {
-  SchemaRegistry as SchemaRegistryType,
   SchemaRegistryEntry,
+  SchemaRegistry as SchemaRegistryType,
 } from './types/schema-registry-types.js'
 import type { FromOptions, Key } from './valkeyrie.js'
 import { Valkeyrie } from './valkeyrie.js'
@@ -36,12 +36,22 @@ export class ValkeyrieBuilder<
     pattern: TPattern,
     schema: TSchema,
   ): ValkeyrieBuilder<
-    readonly [...TRegistry, readonly [TPattern, TSchema] extends SchemaRegistryEntry ? readonly [TPattern, TSchema] : never]
+    readonly [
+      ...TRegistry,
+      readonly [TPattern, TSchema] extends SchemaRegistryEntry
+        ? readonly [TPattern, TSchema]
+        : never,
+    ]
   > {
     this.schemaRegistry.register(pattern, schema)
     // Type assertion needed because we're tracking types at compile-time while mutating at runtime
     return this as unknown as ValkeyrieBuilder<
-      readonly [...TRegistry, readonly [TPattern, TSchema] extends SchemaRegistryEntry ? readonly [TPattern, TSchema] : never]
+      readonly [
+        ...TRegistry,
+        readonly [TPattern, TSchema] extends SchemaRegistryEntry
+          ? readonly [TPattern, TSchema]
+          : never,
+      ]
     >
   }
 
@@ -58,7 +68,11 @@ export class ValkeyrieBuilder<
       destroyOnClose?: boolean
     } = {},
   ): Promise<Valkeyrie<TRegistry>> {
-    return Valkeyrie[kOpen](path, options, this.schemaRegistry) as unknown as Promise<Valkeyrie<TRegistry>>
+    return Valkeyrie[kOpen](
+      path,
+      options,
+      this.schemaRegistry,
+    ) as unknown as Promise<Valkeyrie<TRegistry>>
   }
 
   /**
@@ -71,7 +85,11 @@ export class ValkeyrieBuilder<
     iterable: Iterable<T>,
     options: FromOptions<T>,
   ): Promise<Valkeyrie<TRegistry>> {
-    return Valkeyrie[kFrom](iterable, options, this.schemaRegistry) as unknown as Promise<Valkeyrie<TRegistry>>
+    return Valkeyrie[kFrom](
+      iterable,
+      options,
+      this.schemaRegistry,
+    ) as unknown as Promise<Valkeyrie<TRegistry>>
   }
 
   /**
@@ -84,6 +102,10 @@ export class ValkeyrieBuilder<
     iterable: AsyncIterable<T>,
     options: FromOptions<T>,
   ): Promise<Valkeyrie<TRegistry>> {
-    return Valkeyrie[kFromAsync](iterable, options, this.schemaRegistry) as unknown as Promise<Valkeyrie<TRegistry>>
+    return Valkeyrie[kFromAsync](
+      iterable,
+      options,
+      this.schemaRegistry,
+    ) as unknown as Promise<Valkeyrie<TRegistry>>
   }
 }
