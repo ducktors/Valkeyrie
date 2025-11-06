@@ -127,6 +127,7 @@ describe('Integration with ArkType', () => {
         email: string
         age: number
       }> = user
+      void _typeCheck
 
       assert.ok(true, 'Type inference successful')
       await db.close()
@@ -156,7 +157,10 @@ describe('Integration with ArkType', () => {
         email: string
         age: number
       }> = user
+      void _userCheck
+
       const _postCheck: EntryMaybe<{ title: string; content: string }> = post
+      void _postCheck
 
       assert.ok(true, 'Different types inferred correctly')
       await db.close()
@@ -174,6 +178,7 @@ describe('Integration with ArkType', () => {
       const unknown = await db.get(['comments', '456'])
 
       const _typeCheck: EntryMaybe<unknown> = unknown
+      void _typeCheck
 
       assert.ok(true, 'Unknown type for non-matching pattern')
       await db.close()
@@ -196,12 +201,14 @@ describe('Integration with ArkType', () => {
         email: string
         age: number
       }> = user1
+      void _check1
+
       const _check2: EntryMaybe<{
         name: string
         email: string
         age: number
       }> = user2
-
+      void _check2
       assert.ok(true, 'Wildcard matches various key types')
       await db.close()
     })
@@ -536,6 +543,7 @@ describe('Integration with ArkType', () => {
         email: string
         age: number
       }>[] = typed
+      void _typeCheck
 
       assert.strictEqual(typed.length, 2)
       if (typed[0]?.value) {
@@ -567,6 +575,7 @@ describe('Integration with ArkType', () => {
 
       const untyped = await db.getMany([['users', 'alice']])
       const _untypedCheck: EntryMaybe<unknown>[] = untyped
+      void _untypedCheck
 
       assert.ok(true, 'getMany without type param returns unknown')
       await db.close()
@@ -638,7 +647,7 @@ describe('Integration with ArkType', () => {
         age: 25,
       })
 
-      const list = db.list<{ name: string; email: string; age: number }>({
+      const list = db.list({
         prefix: ['users'],
       })
 
@@ -646,6 +655,8 @@ describe('Integration with ArkType', () => {
       for await (const entry of list) {
         const _typeCheck: { name: string; email: string; age: number } =
           entry.value
+        void _typeCheck
+
         if (entry.value.name === 'Alice') {
           assert.strictEqual(entry.value.age, 30)
           found++
@@ -711,6 +722,7 @@ describe('Integration with ArkType', () => {
 
       const value = await db.get(['any', 'key'])
       const _typeCheck: EntryMaybe<unknown> = value
+      void _typeCheck
 
       assert.ok(true, 'Database without schemas returns unknown')
       await db.close()
@@ -740,8 +752,10 @@ describe('Integration with ArkType', () => {
         email: string
         age: number
       }> = user
-      const _postCheck: EntryMaybe<{ title: string; content: string }> = post
+      void _userCheck
 
+      const _postCheck: EntryMaybe<{ title: string; content: string }> = post
+      void _postCheck
       assert.ok(true, 'Multiple patterns work correctly')
       await db.close()
     })
@@ -773,6 +787,9 @@ describe('Integration with ArkType', () => {
         const _name: string = typed.value.name
         const _email: string = typed.value.email
         const _age: number = typed.value.age
+        void _name
+        void _email
+        void _age
 
         assert.strictEqual(typed.value.name, 'Alice')
         assert.strictEqual(typed.value.age, 30)

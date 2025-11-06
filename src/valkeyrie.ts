@@ -16,6 +16,7 @@ import {
 } from './symbols.js'
 import type {
   InferTypeForKey,
+  InferTypeForPrefix,
   SchemaRegistry as SchemaRegistryType,
 } from './types/schema-registry-types.js'
 import { ValkeyrieBuilder } from './valkeyrie-builder.js'
@@ -1075,6 +1076,23 @@ export class Valkeyrie<TRegistry extends SchemaRegistryType = readonly []> {
     return { ...bounds, prefixHash }
   }
 
+  // Overload for prefix-based selectors with type inference
+  public list<const TPrefix extends Key>(
+    selector: { prefix: TPrefix } | { prefix: TPrefix; start: Key } | { prefix: TPrefix; end: Key },
+    options?: ListOptions,
+  ): AsyncIterableIterator<Entry<InferTypeForPrefix<TRegistry, TPrefix>>, void> & {
+    readonly cursor: string
+    [Symbol.asyncDispose](): Promise<void>
+  }
+  // Overload for range-based selectors without prefix (returns unknown)
+  public list<T = unknown>(
+    selector: { start: Key; end: Key },
+    options?: ListOptions,
+  ): AsyncIterableIterator<Entry<T>, void> & {
+    readonly cursor: string
+    [Symbol.asyncDispose](): Promise<void>
+  }
+  // Implementation
   public list<T = unknown>(
     selector: ListSelector,
     options: ListOptions = {},
