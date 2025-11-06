@@ -1,11 +1,28 @@
 import { serialize } from 'node:v8'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { Driver } from './driver.js'
 import { KvU64 } from './kv-u64.js'
+import type { SchemaRegistry } from './schema-registry.js'
+import { validateReservedKeyParts, validateValue } from './schema-validator.js'
 import type { Serializer } from './serializers/serializer.js'
 import { sqliteDriver } from './sqlite-driver.js'
+import {
+  kCommitVersionstamp,
+  kFrom,
+  kFromAsync,
+  kOpen,
+  kSchemaRegistry,
+  kValkeyrie,
+} from './symbols.js'
+import type {
+  InferTypeForKey,
+  InferTypeForPrefix,
+  SchemaRegistry as SchemaRegistryType,
+} from './types/schema-registry-types.js'
+import { ValkeyrieBuilder } from './valkeyrie-builder.js'
 
 export type KeyPart = Uint8Array | string | number | bigint | boolean | symbol
-export type Key = KeyPart[]
+export type Key = readonly KeyPart[]
 
 interface AtomicCheck {
   key: Key
@@ -79,28 +96,52 @@ export type EntryMaybe<T = unknown> =
       versionstamp: null
     }
 
-const valkeyrieSymbol = Symbol('Valkeyrie')
-const commitVersionstampSymbol = Symbol('ValkeyrieCommitVersionstamp')
-export class Valkeyrie {
+/**
+ * Valkeyrie database instance with optional schema registry type tracking.
+ *
+ * @template TRegistry - Compile-time schema registry for automatic type inference
+ */
+export class Valkeyrie<TRegistry extends SchemaRegistryType = readonly []> {
   #driver: Driver
   #isClosed = false
   #destroyOnClose = false
+  readonly #schemaRegistry?: SchemaRegistry
+
   private constructor(
     functions: Driver,
-    options: { destroyOnClose: boolean },
+    options: { destroyOnClose: boolean; schemaRegistry?: SchemaRegistry },
     symbol?: symbol,
   ) {
-    if (valkeyrieSymbol !== symbol) {
+    if (kValkeyrie !== symbol) {
       throw new TypeError(
         'Valkeyrie can not be constructed: use Valkeyrie.open() to create a new instance',
       )
     }
     this.#driver = functions
     this.#destroyOnClose = options.destroyOnClose
+
+    if (options.schemaRegistry !== undefined) {
+      this.#schemaRegistry = options.schemaRegistry
+    }
   }
 
   commitVersionstamp(): symbol {
-    return commitVersionstampSymbol
+    return kCommitVersionstamp
+  }
+
+  /**
+   * Creates a builder for registering schemas before opening the database.
+   * Uses `const` type parameter to automatically infer literal types without `as const`.
+   *
+   * @param pattern Key pattern with optional '*' wildcards
+   * @param schema Standard schema for validation
+   * @returns A builder instance for chaining with type tracking
+   */
+  public static withSchema<
+    const TPattern extends Key,
+    TSchema extends StandardSchemaV1,
+  >(pattern: TPattern, schema: TSchema) {
+    return new ValkeyrieBuilder().withSchema(pattern, schema)
   }
 
   /**
@@ -116,11 +157,35 @@ export class Valkeyrie {
       destroyOnClose?: boolean
     } = {},
   ): Promise<Valkeyrie> {
+    return Valkeyrie[kOpen](path, options, undefined)
+  }
+
+  /**
+   * Internal method to open a database with schemas.
+   * Used by ValkeyrieBuilder.
+   */
+  static async [kOpen](
+    path?: string,
+    options: {
+      serializer?: () => Serializer
+      destroyOnClose?: boolean
+    } = {},
+    schemaRegistry?: SchemaRegistry,
+  ): Promise<Valkeyrie> {
     const destroyOnClose = options.destroyOnClose ?? false
+    const constructorOptions: {
+      destroyOnClose: boolean
+      schemaRegistry?: SchemaRegistry
+    } = {
+      destroyOnClose,
+    }
+    if (schemaRegistry !== undefined) {
+      constructorOptions.schemaRegistry = schemaRegistry
+    }
     const db = new Valkeyrie(
       await sqliteDriver(path, options.serializer),
-      { destroyOnClose },
-      valkeyrieSymbol,
+      constructorOptions,
+      kValkeyrie,
     )
     await db.cleanup()
     return db
@@ -176,6 +241,18 @@ export class Valkeyrie {
     iterable: Iterable<T>,
     options: FromOptions<T>,
   ): Promise<Valkeyrie> {
+    return Valkeyrie[kFrom](iterable, options, undefined)
+  }
+
+  /**
+   * Internal method to create and populate a database with schemas.
+   * Used by ValkeyrieBuilder.
+   */
+  static async [kFrom]<T>(
+    iterable: Iterable<T>,
+    options: FromOptions<T>,
+    schemaRegistry?: SchemaRegistry,
+  ): Promise<Valkeyrie> {
     // Open or create the database
     const openOptions: {
       serializer?: () => Serializer
@@ -187,7 +264,11 @@ export class Valkeyrie {
     if (options.destroyOnClose !== undefined) {
       openOptions.destroyOnClose = options.destroyOnClose
     }
-    const db: Valkeyrie = await Valkeyrie.open(options.path, openOptions)
+    const db: Valkeyrie = await Valkeyrie[kOpen](
+      options.path,
+      openOptions,
+      schemaRegistry,
+    )
 
     const {
       prefix,
@@ -288,6 +369,18 @@ export class Valkeyrie {
     iterable: AsyncIterable<T>,
     options: FromOptions<T>,
   ): Promise<Valkeyrie> {
+    return Valkeyrie[kFromAsync](iterable, options, undefined)
+  }
+
+  /**
+   * Internal method to create and populate a database with schemas from async iterable.
+   * Used by ValkeyrieBuilder.
+   */
+  static async [kFromAsync]<T>(
+    iterable: AsyncIterable<T>,
+    options: FromOptions<T>,
+    schemaRegistry?: SchemaRegistry,
+  ): Promise<Valkeyrie> {
     // Open or create the database
     const openOptions: {
       serializer?: () => Serializer
@@ -299,7 +392,11 @@ export class Valkeyrie {
     if (options.destroyOnClose !== undefined) {
       openOptions.destroyOnClose = options.destroyOnClose
     }
-    const db: Valkeyrie = await Valkeyrie.open(options.path, openOptions)
+    const db: Valkeyrie = await Valkeyrie[kOpen](
+      options.path,
+      openOptions,
+      schemaRegistry,
+    )
 
     const {
       prefix,
@@ -640,7 +737,16 @@ export class Valkeyrie {
     return parts
   }
 
-  public async get<T = unknown>(key: Key): Promise<EntryMaybe<T>> {
+  /**
+   * Gets a value from the database with automatic type inference based on registered schemas.
+   * Uses `const` type parameter to automatically infer literal key types without `as const`.
+   *
+   * @param key - The key to retrieve (supports literal type inference)
+   * @returns Entry with the value or null if not found. Type is automatically inferred from schema registry.
+   */
+  public async get<const TKey extends Key>(
+    key: TKey,
+  ): Promise<EntryMaybe<InferTypeForKey<TRegistry, TKey>>> {
     this.throwIfClosed()
     this.validateKeys([key])
     if (key.length === 0) {
@@ -656,23 +762,41 @@ export class Valkeyrie {
 
     return {
       key: this.decodeKeyHash(result.keyHash),
-      value: result.value as T,
+      value: result.value as InferTypeForKey<TRegistry, TKey>,
       versionstamp: result.versionstamp,
     }
   }
 
+  /**
+   * Gets multiple values from the database.
+   * Note: For type inference, use individual get() calls instead.
+   *
+   * @param keys - Array of keys to retrieve
+   * @returns Array of entries with values or nulls
+   */
   public async getMany<T = unknown>(keys: Key[]): Promise<EntryMaybe<T>[]> {
     this.throwIfClosed()
     this.validateKeys(keys)
     if (keys.length > 10) {
       throw new TypeError('Too many ranges (max 10)')
     }
-    return Promise.all(keys.map((key) => this.get<T>(key)))
+    return Promise.all(keys.map((key) => this.get(key))) as Promise<
+      EntryMaybe<T>[]
+    >
   }
 
-  public async set<T = unknown>(
-    key: Key,
-    value: T,
+  /**
+   * Sets a value in the database with automatic type checking based on registered schemas.
+   * Uses `const` type parameter to automatically infer literal key types without `as const`.
+   *
+   * @param key - The key to set (supports literal type inference)
+   * @param value - The value to set. Type is automatically checked against schema registry.
+   * @param options - Optional settings like expireIn
+   * @returns Result with versionstamp
+   */
+  public async set<const TKey extends Key>(
+    key: TKey,
+    value: InferTypeForKey<TRegistry, TKey>,
     options: SetOptions = {},
   ): Promise<{ ok: true; versionstamp: string }> {
     this.throwIfClosed()
@@ -680,12 +804,19 @@ export class Valkeyrie {
     if (key.length === 0) {
       throw new Error('Key cannot be empty')
     }
+
+    // Validate that key doesn't contain reserved '*' wildcard
+    validateReservedKeyParts(key)
+
+    // Validate value against schema if one is registered
+    const validatedValue = await validateValue(key, value, this.#schemaRegistry)
+
     const keyHash = this.hashKey(key, 'write')
     const versionstamp = await this.generateVersionstamp()
 
     await this.#driver.set(
       keyHash,
-      value,
+      validatedValue,
       versionstamp,
       options.expireIn ? Date.now() + options.expireIn : undefined,
     )
@@ -945,6 +1076,28 @@ export class Valkeyrie {
     return { ...bounds, prefixHash }
   }
 
+  // Overload for prefix-based selectors with type inference
+  public list<const TPrefix extends Key>(
+    selector:
+      | { prefix: TPrefix }
+      | { prefix: TPrefix; start: Key }
+      | { prefix: TPrefix; end: Key },
+    options?: ListOptions,
+  ): AsyncIterableIterator<
+    Entry<InferTypeForPrefix<TRegistry, TPrefix>>,
+    void
+  > & {
+    readonly cursor: string
+    [Symbol.asyncDispose](): Promise<void>
+  }
+  // Overload for range-based selectors without prefix (returns unknown)
+  public list<T = unknown>(
+    selector: { start: Key; end: Key },
+    options?: ListOptions,
+  ): AsyncIterableIterator<Entry<T>, void> & {
+    readonly cursor: string
+    [Symbol.asyncDispose](): Promise<void>
+  }
   public list<T = unknown>(
     selector: ListSelector,
     options: ListOptions = {},
@@ -1038,9 +1191,17 @@ export class Valkeyrie {
     this.#driver.cleanup(now)
   }
 
-  public atomic(): AtomicOperation {
+  public atomic(): AtomicOperation<TRegistry> {
     this.throwIfClosed()
     return new AtomicOperation(this)
+  }
+
+  /**
+   * Internal symbol-based accessor for schema registry.
+   * Used by AtomicOperation for validation.
+   */
+  get [kSchemaRegistry](): SchemaRegistry | undefined {
+    return this.#schemaRegistry
   }
 
   public async executeAtomicOperation(
@@ -1144,6 +1305,20 @@ export class Valkeyrie {
     }
   }
 
+  /**
+   * Watches multiple keys for changes with automatic type inference based on registered schemas.
+   * Uses `const` type parameter to automatically infer literal key types without `as const`.
+   *
+   * @param keys - Array of keys to watch (supports literal type inference)
+   * @returns ReadableStream of entry arrays. Types are automatically inferred from schema registry.
+   */
+  public watch<const TKeys extends readonly Key[]>(
+    keys: [...TKeys],
+  ): ReadableStream<{
+    [K in keyof TKeys]: TKeys[K] extends Key
+      ? EntryMaybe<InferTypeForKey<TRegistry, TKeys[K]>>
+      : never
+  }>
   public watch<T extends readonly unknown[]>(
     keys: Key[],
   ): ReadableStream<EntryMaybe<T[number]>[]> {
@@ -1170,14 +1345,16 @@ export class Valkeyrie {
 }
 
 // Internal class - not exported
-export class AtomicOperation {
+export class AtomicOperation<
+  TRegistry extends SchemaRegistryType = readonly [],
+> {
   private checks: Check[] = []
   private mutations: Mutation[] = []
-  private valkeyrie: Valkeyrie
+  private valkeyrie: Valkeyrie<TRegistry>
   private totalMutationSize = 0
   private totalKeySize = 0
 
-  constructor(valkeyrie: Valkeyrie) {
+  constructor(valkeyrie: Valkeyrie<TRegistry>) {
     this.valkeyrie = valkeyrie
   }
 
@@ -1194,7 +1371,7 @@ export class AtomicOperation {
     }
   }
 
-  check(...checks: AtomicCheck[]): AtomicOperation {
+  check(...checks: AtomicCheck[]): AtomicOperation<TRegistry> {
     for (const check of checks) {
       if (this.checks.length >= 100) {
         throw new TypeError('Too many checks (max 100)')
@@ -1206,7 +1383,7 @@ export class AtomicOperation {
     return this
   }
 
-  mutate(...mutations: Mutation[]): AtomicOperation {
+  mutate(...mutations: Mutation[]): AtomicOperation<TRegistry> {
     for (const mutation of mutations) {
       if (this.mutations.length >= 1000) {
         throw new TypeError('Too many mutations (max 1000)')
@@ -1215,6 +1392,9 @@ export class AtomicOperation {
       if (mutation.key.length === 0) {
         throw new Error('Key cannot be empty')
       }
+
+      // Validate that key doesn't contain reserved '*' wildcard
+      validateReservedKeyParts(mutation.key)
 
       const keySize = serialize(mutation.key).length
       this.totalKeySize += keySize
@@ -1268,11 +1448,11 @@ export class AtomicOperation {
     return this
   }
 
-  set<T = unknown>(
-    key: Key,
-    value: T,
+  set<const TKey extends Key>(
+    key: TKey,
+    value: InferTypeForKey<TRegistry, TKey>,
     options: SetOptions = {},
-  ): AtomicOperation {
+  ): AtomicOperation<TRegistry> {
     return this.mutate({
       type: 'set',
       key,
@@ -1281,21 +1461,21 @@ export class AtomicOperation {
     })
   }
 
-  delete(key: Key): AtomicOperation {
+  delete(key: Key): AtomicOperation<TRegistry> {
     return this.mutate({ type: 'delete', key })
   }
 
-  sum(key: Key, value: bigint | KvU64): AtomicOperation {
+  sum(key: Key, value: bigint | KvU64): AtomicOperation<TRegistry> {
     const u64Value = value instanceof KvU64 ? value : new KvU64(BigInt(value))
     return this.mutate({ type: 'sum', key, value: u64Value })
   }
 
-  max(key: Key, value: bigint | KvU64): AtomicOperation {
+  max(key: Key, value: bigint | KvU64): AtomicOperation<TRegistry> {
     const u64Value = value instanceof KvU64 ? value : new KvU64(BigInt(value))
     return this.mutate({ type: 'max', key, value: u64Value })
   }
 
-  min(key: Key, value: bigint | KvU64): AtomicOperation {
+  min(key: Key, value: bigint | KvU64): AtomicOperation<TRegistry> {
     const u64Value = value instanceof KvU64 ? value : new KvU64(BigInt(value))
     return this.mutate({ type: 'min', key, value: u64Value })
   }
@@ -1308,6 +1488,34 @@ export class AtomicOperation {
     if (this.totalMutationSize > 819200) {
       throw new TypeError('Total mutation size too large (max 819200 bytes)')
     }
-    return this.valkeyrie.executeAtomicOperation(this.checks, this.mutations)
+
+    // Validate all 'set' mutations against schemas before committing
+    const schemaRegistry = this.valkeyrie[kSchemaRegistry]
+    const validatedMutations: Mutation[] = []
+
+    for (const mutation of this.mutations) {
+      if (mutation.type === 'set') {
+        // Validate the value against the schema
+        const validatedValue = await validateValue(
+          mutation.key,
+          mutation.value,
+          schemaRegistry,
+        )
+
+        // Create new mutation with validated value
+        validatedMutations.push({
+          ...mutation,
+          value: validatedValue,
+        })
+      } else {
+        // Non-set mutations don't need validation
+        validatedMutations.push(mutation)
+      }
+    }
+
+    return this.valkeyrie.executeAtomicOperation(
+      this.checks,
+      validatedMutations,
+    )
   }
 }
