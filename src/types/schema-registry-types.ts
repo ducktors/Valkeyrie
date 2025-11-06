@@ -132,3 +132,20 @@ export type InferTypeForPrefix<
 > = FindSchemaForPrefix<TRegistry, TPrefix> extends never
   ? unknown
   : InferSchemaOutput<FindSchemaForPrefix<TRegistry, TPrefix>>
+
+/**
+ * Maps an array of keys to their inferred types
+ * Used by watch() to infer the type of each watched key
+ */
+export type InferTypesForKeys<
+  TRegistry extends SchemaRegistry,
+  TKeys extends readonly Key[],
+> = TKeys extends readonly [
+  infer First extends Key,
+  ...infer Rest extends readonly Key[],
+]
+  ? readonly [
+      InferTypeForKey<TRegistry, First>,
+      ...InferTypesForKeys<TRegistry, Rest>,
+    ]
+  : readonly []

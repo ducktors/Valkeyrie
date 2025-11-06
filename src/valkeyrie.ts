@@ -1098,7 +1098,6 @@ export class Valkeyrie<TRegistry extends SchemaRegistryType = readonly []> {
     readonly cursor: string
     [Symbol.asyncDispose](): Promise<void>
   }
-  // Implementation
   public list<T = unknown>(
     selector: ListSelector,
     options: ListOptions = {},
@@ -1306,6 +1305,20 @@ export class Valkeyrie<TRegistry extends SchemaRegistryType = readonly []> {
     }
   }
 
+  /**
+   * Watches multiple keys for changes with automatic type inference based on registered schemas.
+   * Uses `const` type parameter to automatically infer literal key types without `as const`.
+   *
+   * @param keys - Array of keys to watch (supports literal type inference)
+   * @returns ReadableStream of entry arrays. Types are automatically inferred from schema registry.
+   */
+  public watch<const TKeys extends readonly Key[]>(
+    keys: [...TKeys],
+  ): ReadableStream<{
+    [K in keyof TKeys]: TKeys[K] extends Key
+      ? EntryMaybe<InferTypeForKey<TRegistry, TKeys[K]>>
+      : never
+  }>
   public watch<T extends readonly unknown[]>(
     keys: Key[],
   ): ReadableStream<EntryMaybe<T[number]>[]> {

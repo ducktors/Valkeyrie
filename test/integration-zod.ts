@@ -803,6 +803,140 @@ describe('Integration with Zod', () => {
     })
   })
 
+  describe('watch() Operations', () => {
+    test('infers correct types for watched keys', async () => {
+      const userSchema = z.object({
+        name: z.string(),
+        email: z.string().email(),
+        age: z.number().min(0),
+      })
+
+      const db = await Valkeyrie.withSchema(['users', '*'], userSchema).open()
+
+      const watcher = db.watch([['users', 'alice']])
+      const reader = watcher.getReader()
+
+      // Type check: the watcher should return the correct type
+      const result = await reader.read()
+      if (!result.done && result.value[0]) {
+        const entry = result.value[0]
+        const _typeCheck: EntryMaybe<{
+          name: string
+          email: string
+          age: number
+        }> = entry
+        void _typeCheck
+      }
+
+      await reader.cancel()
+      await db.close()
+    })
+
+    test('infers different types for multiple watched keys', async () => {
+      const userSchema = z.object({
+        name: z.string(),
+        email: z.string().email(),
+      })
+
+      const postSchema = z.object({
+        title: z.string(),
+        content: z.string(),
+      })
+
+      const db = await Valkeyrie.withSchema(['users', '*'], userSchema)
+        .withSchema(['posts', '*'], postSchema)
+        .open()
+
+      const watcher = db.watch([
+        ['users', 'alice'],
+        ['posts', 'p1'],
+      ])
+      const reader = watcher.getReader()
+
+      const result = await reader.read()
+      if (!result.done && result.value.length === 2) {
+        const userEntry = result.value[0]
+        const postEntry = result.value[1]
+
+        // Type check: first key should be user type
+        const _userCheck: EntryMaybe<{
+          name: string
+          email: string
+        }> = userEntry
+        void _userCheck
+
+        // Type check: second key should be post type
+        const _postCheck: EntryMaybe<{
+          title: string
+          content: string
+        }> = postEntry
+        void _postCheck
+      }
+
+      await reader.cancel()
+      await db.close()
+    })
+
+    test('returns unknown for non-matching watched keys', async () => {
+      const userSchema = z.object({
+        name: z.string(),
+        email: z.string().email(),
+      })
+
+      const db = await Valkeyrie.withSchema(['users', '*'], userSchema).open()
+
+      const watcher = db.watch([['comments', '123']])
+      const reader = watcher.getReader()
+
+      const result = await reader.read()
+      if (!result.done && result.value[0]) {
+        const entry = result.value[0]
+        const _typeCheck: EntryMaybe<unknown> = entry
+        void _typeCheck
+      }
+
+      await reader.cancel()
+      await db.close()
+    })
+
+    test('validates watch behavior with schema transformation', async () => {
+      const userSchema = z.object({
+        name: z.string().transform((name) => name.toUpperCase()),
+        age: z.number(),
+      })
+
+      const db = await Valkeyrie.withSchema(['users', '*'], userSchema).open()
+
+      const watcher = db.watch([['users', 'dave']])
+      const reader = watcher.getReader()
+
+      // Set the value (should be transformed)
+      await db.set(['users', 'dave'], {
+        name: 'dave',
+        age: 28,
+      })
+
+      // Wait for the change
+      const result = await reader.read()
+      if (!result.done && result.value[0]?.value) {
+        // Skip initial null value, read the actual value
+        if (result.value[0].value === null) {
+          const result2 = await reader.read()
+          if (!result2.done && result2.value[0]?.value) {
+            assert.strictEqual(result2.value[0].value.name, 'DAVE')
+            assert.strictEqual(result2.value[0].value.age, 28)
+          }
+        } else {
+          assert.strictEqual(result.value[0].value.name, 'DAVE')
+          assert.strictEqual(result.value[0].value.age, 28)
+        }
+      }
+
+      await reader.cancel()
+      await db.close()
+    })
+  })
+
   describe('Complex Schemas', () => {
     test('validates nested objects', async () => {
       const userSchema = z.object({

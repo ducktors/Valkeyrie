@@ -1695,10 +1695,8 @@ describe('test valkeyrie', async () => {
   })
 
   dbTest('key watch', async (db) => {
-    const changeHistory: EntryMaybe<number>[] = []
-    const watcher: ReadableStream<EntryMaybe<number>[]> = db.watch<number[]>([
-      ['key'],
-    ])
+    const changeHistory: EntryMaybe<unknown>[] = []
+    const watcher = db.watch([['key']])
 
     const reader = watcher.getReader()
     const expectedChanges = 2
