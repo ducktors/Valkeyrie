@@ -61,7 +61,7 @@
     "keyvalue"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "bugs": {
     "url": "https://github.com/ducktors/valkeyrie/issues"
