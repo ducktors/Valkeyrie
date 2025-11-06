@@ -2,14 +2,22 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 import { SchemaRegistry } from './schema-registry.js'
 import type { Serializer } from './serializers/serializer.js'
 import { kFrom, kFromAsync, kOpen } from './symbols.js'
+import type {
+  SchemaRegistry as SchemaRegistryType,
+  SchemaRegistryEntry,
+} from './types/schema-registry-types.js'
 import type { FromOptions, Key } from './valkeyrie.js'
 import { Valkeyrie } from './valkeyrie.js'
 
 /**
  * Builder for creating Valkeyrie instances with schema validation.
  * Schemas are registered before opening the database and become immutable after.
+ *
+ * @template TRegistry - Compile-time schema registry for type inference
  */
-export class ValkeyrieBuilder {
+export class ValkeyrieBuilder<
+  TRegistry extends SchemaRegistryType = readonly [],
+> {
   private schemaRegistry: SchemaRegistry
 
   constructor() {
@@ -18,20 +26,30 @@ export class ValkeyrieBuilder {
 
   /**
    * Registers a schema pattern for validation.
+   * Uses `const` type parameter to automatically infer literal types without `as const`.
+   *
    * @param pattern Key pattern with optional '*' wildcards
    * @param schema Standard schema for validation
-   * @returns this builder for chaining
+   * @returns A new builder with the updated schema registry type
    */
-  withSchema(pattern: Key, schema: StandardSchemaV1): ValkeyrieBuilder {
+  withSchema<const TPattern extends Key, TSchema extends StandardSchemaV1>(
+    pattern: TPattern,
+    schema: TSchema,
+  ): ValkeyrieBuilder<
+    readonly [...TRegistry, readonly [TPattern, TSchema] extends SchemaRegistryEntry ? readonly [TPattern, TSchema] : never]
+  > {
     this.schemaRegistry.register(pattern, schema)
-    return this
+    // Type assertion needed because we're tracking types at compile-time while mutating at runtime
+    return this as unknown as ValkeyrieBuilder<
+      readonly [...TRegistry, readonly [TPattern, TSchema] extends SchemaRegistryEntry ? readonly [TPattern, TSchema] : never]
+    >
   }
 
   /**
    * Opens a new Valkeyrie database instance with registered schemas.
    * @param path Optional path to the database file (defaults to in-memory)
    * @param options Optional configuration options
-   * @returns A new Valkeyrie instance with schema validation
+   * @returns A new Valkeyrie instance with schema validation and type inference
    */
   async open(
     path?: string,
@@ -39,33 +57,33 @@ export class ValkeyrieBuilder {
       serializer?: () => Serializer
       destroyOnClose?: boolean
     } = {},
-  ): Promise<Valkeyrie> {
-    return Valkeyrie[kOpen](path, options, this.schemaRegistry)
+  ): Promise<Valkeyrie<TRegistry>> {
+    return Valkeyrie[kOpen](path, options, this.schemaRegistry) as unknown as Promise<Valkeyrie<TRegistry>>
   }
 
   /**
    * Creates and populates a Valkeyrie database from a synchronous iterable with schemas.
    * @param iterable The iterable to populate the database from
    * @param options Configuration options including prefix and key extraction
-   * @returns A populated Valkeyrie instance with schema validation
+   * @returns A populated Valkeyrie instance with schema validation and type inference
    */
   async from<T>(
     iterable: Iterable<T>,
     options: FromOptions<T>,
-  ): Promise<Valkeyrie> {
-    return Valkeyrie[kFrom](iterable, options, this.schemaRegistry)
+  ): Promise<Valkeyrie<TRegistry>> {
+    return Valkeyrie[kFrom](iterable, options, this.schemaRegistry) as unknown as Promise<Valkeyrie<TRegistry>>
   }
 
   /**
    * Creates and populates a Valkeyrie database from an asynchronous iterable with schemas.
    * @param iterable The async iterable to populate the database from
    * @param options Configuration options including prefix and key extraction
-   * @returns A populated Valkeyrie instance with schema validation
+   * @returns A populated Valkeyrie instance with schema validation and type inference
    */
   async fromAsync<T>(
     iterable: AsyncIterable<T>,
     options: FromOptions<T>,
-  ): Promise<Valkeyrie> {
-    return Valkeyrie[kFromAsync](iterable, options, this.schemaRegistry)
+  ): Promise<Valkeyrie<TRegistry>> {
+    return Valkeyrie[kFromAsync](iterable, options, this.schemaRegistry) as unknown as Promise<Valkeyrie<TRegistry>>
   }
 }

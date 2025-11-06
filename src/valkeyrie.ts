@@ -14,18 +14,14 @@ import {
   kSchemaRegistry,
   kValkeyrie,
 } from './symbols.js'
+import type {
+  InferTypeForKey,
+  SchemaRegistry as SchemaRegistryType,
+} from './types/schema-registry-types.js'
 import { ValkeyrieBuilder } from './valkeyrie-builder.js'
 
 export type KeyPart = Uint8Array | string | number | bigint | boolean | symbol
-export type Key = KeyPart[]
-
-/**
- * Internal helper type that automatically infers StandardSchemaV1 output if T is a schema.
- * Falls back to T if it's not a schema.
- */
-type MaybeInferSchema<T> = T extends StandardSchemaV1
-  ? StandardSchemaV1.InferOutput<T>
-  : T
+export type Key = readonly KeyPart[]
 
 interface AtomicCheck {
   key: Key
@@ -99,7 +95,12 @@ export type EntryMaybe<T = unknown> =
       versionstamp: null
     }
 
-export class Valkeyrie {
+/**
+ * Valkeyrie database instance with optional schema registry type tracking.
+ *
+ * @template TRegistry - Compile-time schema registry for automatic type inference
+ */
+export class Valkeyrie<TRegistry extends SchemaRegistryType = readonly []> {
   #driver: Driver
   #isClosed = false
   #destroyOnClose = false
@@ -129,14 +130,16 @@ export class Valkeyrie {
 
   /**
    * Creates a builder for registering schemas before opening the database.
+   * Uses `const` type parameter to automatically infer literal types without `as const`.
+   *
    * @param pattern Key pattern with optional '*' wildcards
    * @param schema Standard schema for validation
-   * @returns A builder instance for chaining
+   * @returns A builder instance for chaining with type tracking
    */
-  public static withSchema(
-    pattern: Key,
-    schema: StandardSchemaV1,
-  ): ValkeyrieBuilder {
+  public static withSchema<
+    const TPattern extends Key,
+    TSchema extends StandardSchemaV1,
+  >(pattern: TPattern, schema: TSchema) {
     return new ValkeyrieBuilder().withSchema(pattern, schema)
   }
 
@@ -733,9 +736,16 @@ export class Valkeyrie {
     return parts
   }
 
-  public async get<T = unknown>(
-    key: Key,
-  ): Promise<EntryMaybe<MaybeInferSchema<T>>> {
+  /**
+   * Gets a value from the database with automatic type inference based on registered schemas.
+   * Uses `const` type parameter to automatically infer literal key types without `as const`.
+   *
+   * @param key - The key to retrieve (supports literal type inference)
+   * @returns Entry with the value or null if not found. Type is automatically inferred from schema registry.
+   */
+  public async get<const TKey extends Key>(
+    key: TKey,
+  ): Promise<EntryMaybe<InferTypeForKey<TRegistry, TKey>>> {
     this.throwIfClosed()
     this.validateKeys([key])
     if (key.length === 0) {
@@ -751,25 +761,41 @@ export class Valkeyrie {
 
     return {
       key: this.decodeKeyHash(result.keyHash),
-      value: result.value as MaybeInferSchema<T>,
+      value: result.value as InferTypeForKey<TRegistry, TKey>,
       versionstamp: result.versionstamp,
     }
   }
 
+  /**
+   * Gets multiple values from the database.
+   * Note: For type inference, use individual get() calls instead.
+   *
+   * @param keys - Array of keys to retrieve
+   * @returns Array of entries with values or nulls
+   */
   public async getMany<T = unknown>(
     keys: Key[],
-  ): Promise<EntryMaybe<MaybeInferSchema<T>>[]> {
+  ): Promise<EntryMaybe<T>[]> {
     this.throwIfClosed()
     this.validateKeys(keys)
     if (keys.length > 10) {
       throw new TypeError('Too many ranges (max 10)')
     }
-    return Promise.all(keys.map((key) => this.get<T>(key)))
+    return Promise.all(keys.map((key) => this.get(key))) as Promise<EntryMaybe<T>[]>
   }
 
-  public async set<T = unknown>(
-    key: Key,
-    value: T,
+  /**
+   * Sets a value in the database with automatic type checking based on registered schemas.
+   * Uses `const` type parameter to automatically infer literal key types without `as const`.
+   *
+   * @param key - The key to set (supports literal type inference)
+   * @param value - The value to set. Type is automatically checked against schema registry.
+   * @param options - Optional settings like expireIn
+   * @returns Result with versionstamp
+   */
+  public async set<const TKey extends Key>(
+    key: TKey,
+    value: InferTypeForKey<TRegistry, TKey>,
     options: SetOptions = {},
   ): Promise<{ ok: true; versionstamp: string }> {
     this.throwIfClosed()
@@ -1142,7 +1168,7 @@ export class Valkeyrie {
     this.#driver.cleanup(now)
   }
 
-  public atomic(): AtomicOperation {
+  public atomic(): AtomicOperation<TRegistry> {
     this.throwIfClosed()
     return new AtomicOperation(this)
   }
@@ -1282,14 +1308,14 @@ export class Valkeyrie {
 }
 
 // Internal class - not exported
-export class AtomicOperation {
+export class AtomicOperation<TRegistry extends SchemaRegistryType = readonly []> {
   private checks: Check[] = []
   private mutations: Mutation[] = []
-  private valkeyrie: Valkeyrie
+  private valkeyrie: Valkeyrie<TRegistry>
   private totalMutationSize = 0
   private totalKeySize = 0
 
-  constructor(valkeyrie: Valkeyrie) {
+  constructor(valkeyrie: Valkeyrie<TRegistry>) {
     this.valkeyrie = valkeyrie
   }
 
@@ -1306,7 +1332,7 @@ export class AtomicOperation {
     }
   }
 
-  check(...checks: AtomicCheck[]): AtomicOperation {
+  check(...checks: AtomicCheck[]): AtomicOperation<TRegistry> {
     for (const check of checks) {
       if (this.checks.length >= 100) {
         throw new TypeError('Too many checks (max 100)')
@@ -1318,7 +1344,7 @@ export class AtomicOperation {
     return this
   }
 
-  mutate(...mutations: Mutation[]): AtomicOperation {
+  mutate(...mutations: Mutation[]): AtomicOperation<TRegistry> {
     for (const mutation of mutations) {
       if (this.mutations.length >= 1000) {
         throw new TypeError('Too many mutations (max 1000)')
@@ -1383,11 +1409,11 @@ export class AtomicOperation {
     return this
   }
 
-  set<T = unknown>(
-    key: Key,
-    value: T,
+  set<const TKey extends Key>(
+    key: TKey,
+    value: InferTypeForKey<TRegistry, TKey>,
     options: SetOptions = {},
-  ): AtomicOperation {
+  ): AtomicOperation<TRegistry> {
     return this.mutate({
       type: 'set',
       key,
@@ -1396,21 +1422,21 @@ export class AtomicOperation {
     })
   }
 
-  delete(key: Key): AtomicOperation {
+  delete(key: Key): AtomicOperation<TRegistry> {
     return this.mutate({ type: 'delete', key })
   }
 
-  sum(key: Key, value: bigint | KvU64): AtomicOperation {
+  sum(key: Key, value: bigint | KvU64): AtomicOperation<TRegistry> {
     const u64Value = value instanceof KvU64 ? value : new KvU64(BigInt(value))
     return this.mutate({ type: 'sum', key, value: u64Value })
   }
 
-  max(key: Key, value: bigint | KvU64): AtomicOperation {
+  max(key: Key, value: bigint | KvU64): AtomicOperation<TRegistry> {
     const u64Value = value instanceof KvU64 ? value : new KvU64(BigInt(value))
     return this.mutate({ type: 'max', key, value: u64Value })
   }
 
-  min(key: Key, value: bigint | KvU64): AtomicOperation {
+  min(key: Key, value: bigint | KvU64): AtomicOperation<TRegistry> {
     const u64Value = value instanceof KvU64 ? value : new KvU64(BigInt(value))
     return this.mutate({ type: 'min', key, value: u64Value })
   }
