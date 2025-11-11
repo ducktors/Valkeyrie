@@ -74,9 +74,6 @@ pnpm test
 
 # Run linting
 pnpm lint
-
-# Run benchmarks
-pnpm benchmark
 ```
 
 ### Coding Standards

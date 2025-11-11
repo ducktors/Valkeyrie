@@ -85,11 +85,7 @@
     "check-updates": "pnpm outdated --recursive --long",
     "test": "tsc --noEmit && tsx --test ./test/*.ts",
     "test:watch": "tsc --noEmit && tsx --watch --test \"./test/*.ts\"",
-    "test:coverage": "tsc --noEmit && c8 --all --src src --reporter lcov --reporter text tsx --test ./test/*.ts",
-    "benchmark": "tsx ./benchmark/index.ts",
-    "benchmark:basic": "tsx ./benchmark/basic.ts",
-    "benchmark:list": "tsx ./benchmark/list.ts",
-    "benchmark:atomic": "tsx ./benchmark/atomic.ts"
+    "test:coverage": "tsc --noEmit && c8 --all --src src --reporter lcov --reporter text tsx --test ./test/*.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
@@ -107,7 +103,6 @@
     "commitlint-plugin-function-rules": "^4.0.1",
     "husky": "^9.1.7",
     "lint-staged": "^15.4.3",
-    "mitata": "^1.0.34",
     "rimraf": "^6.0.1",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",
