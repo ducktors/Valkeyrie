@@ -23,7 +23,6 @@ This is a work in progress, but the API and everything already implemented is st
   - [Basic Operations](#basic-operations)
 - [Documentation](#documentation)
 - [Contributing](#contributing)
-- [Benchmarks](#benchmarks)
 - [License](#license)
 
 ## Features
@@ -193,20 +192,6 @@ await db.destroy();
 ## Contributing
 
 For detailed information on how to contribute to this project, please see our [Contributing Guide](./CONTRIBUTING.md).
-
-## Benchmarks
-
-Valkeyrie includes a comprehensive benchmarking suite to measure performance:
-
-```bash
-# Run all benchmarks
-pnpm benchmark
-
-# Run specific benchmark suites
-pnpm benchmark:basic    # Basic operations
-pnpm benchmark:list     # List operations
-pnpm benchmark:atomic   # Atomic operations
-```
 
 ## License
 

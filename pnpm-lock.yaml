@@ -66,9 +66,6 @@ importers:
       lint-staged:
         specifier: ^15.4.3
         version: 15.5.0
-      mitata:
-        specifier: ^1.0.34
-        version: 1.0.34
       rimraf:
         specifier: ^6.0.1
         version: 6.0.1
@@ -1494,9 +1491,6 @@ packages:
   minizlib@3.0.1:
     resolution: {integrity: sha512-umcy022ILvb5/3Djuu8LWeqUa8D68JaBzlttKeMWen48SjabqS3iY5w/vzeMzMUNhLDifyhbOwKDSznB1vvrwg==}
     engines: {node: '>= 18'}
-
-  mitata@1.0.34:
-    resolution: {integrity: sha512-Mc3zrtNBKIMeHSCQ0XqRLo1vbdIx1wvFV9c8NJAiyho6AjNfMY8bVhbS12bwciUdd1t4rj8099CH3N3NFahaUA==}
 
   mkdirp@1.0.4:
     resolution: {integrity: sha512-vVqVZQyf3WLx2Shd0qJ9xuvqgAyKPLAiqITEtqW0oIUjzo3PePDd6fW9iFz30ef7Ysp/oiWqbhszeGWW2T6Gzw==}
@@ -3659,8 +3653,6 @@ snapshots:
     dependencies:
       minipass: 7.1.2
       rimraf: 5.0.10
-
-  mitata@1.0.34: {}
 
   mkdirp@1.0.4: {}
 

@@ -264,17 +264,6 @@ const db = await Valkeyrie
 
 ## Serializer Comparison
 
-### Performance Benchmark
-
-Based on typical workloads (results may vary):
-
-| Operation | V8 | JSON | BSON | MessagePack | CBOR-X |
-|-----------|----|----|------|-------------|--------|
-| Write (simple) | 🟢 Fast | 🟡 Medium | 🟢 Fast | 🟢 Fast | 🟢 Very Fast |
-| Write (complex) | 🟢 Very Fast | 🔴 Slow | 🟢 Fast | 🟢 Fast | 🟢 Very Fast |
-| Read (simple) | 🟢 Fast | 🟡 Medium | 🟢 Fast | 🟢 Fast | 🟢 Very Fast |
-| Read (complex) | 🟢 Very Fast | 🔴 Slow | 🟢 Fast | 🟢 Fast | 🟢 Very Fast |
-
 ### Size Comparison
 
 For typical data (1000 user objects):
@@ -547,36 +536,6 @@ const db = await Valkeyrie.open('./data.db', { serializer });
 const db = await Valkeyrie.open('./data.db', {
   serializer: cborXSerializer
 });
-```
-
-### 5. Benchmark Your Workload
-
-```typescript
-import { performance } from 'node:perf_hooks';
-
-async function benchmarkSerializer(serializer, data) {
-  const db = await Valkeyrie.open(':memory:', { serializer });
-
-  const start = performance.now();
-  for (let i = 0; i < 1000; i++) {
-    await db.set(['key', i], data);
-  }
-  const writeTime = performance.now() - start;
-
-  const readStart = performance.now();
-  for (let i = 0; i < 1000; i++) {
-    await db.get(['key', i]);
-  }
-  const readTime = performance.now() - readStart;
-
-  await db.close();
-
-  return { writeTime, readTime };
-}
-
-// Test with your data
-const results = await benchmarkSerializer(cborXSerializer, yourData);
-console.log(results);
 ```
 
 ## Summary
