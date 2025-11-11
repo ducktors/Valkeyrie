@@ -1,8 +1,8 @@
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
-import { KvU64 } from '../src/kv-u64.js'
-import { msgpackrSerializer } from '../src/serializers/msgpackr.js'
-import { type Key, type Mutation, Valkeyrie } from '../src/valkeyrie.js'
+import { KvU64 } from '../src/kv-u64.ts'
+import { msgpackrSerializer } from '../src/serializers/msgpackr.ts'
+import { type Key, type Mutation, Valkeyrie } from '../src/valkeyrie.ts'
 
 describe('msgpackr serializer', async () => {
   async function dbTest(

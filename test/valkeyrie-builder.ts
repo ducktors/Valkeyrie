@@ -1,8 +1,8 @@
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import { ValkeyrieBuilder } from '../src/valkeyrie-builder.js'
-import { Valkeyrie } from '../src/valkeyrie.js'
+import { ValkeyrieBuilder } from '../src/valkeyrie-builder.ts'
+import { Valkeyrie } from '../src/valkeyrie.ts'
 
 // Mock schema for testing
 const createMockSchema = (name: string): StandardSchemaV1 =>

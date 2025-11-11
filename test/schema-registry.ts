@@ -1,7 +1,7 @@
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import { SchemaRegistry } from '../src/schema-registry.js'
+import { SchemaRegistry } from '../src/schema-registry.ts'
 
 // Mock schema for testing
 const createMockSchema = (name: string): StandardSchemaV1 =>

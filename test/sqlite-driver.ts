@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { unlink } from 'node:fs/promises'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 import { setTimeout } from 'node:timers/promises'
-import { sqliteDriver } from '../src/sqlite-driver.js'
+import { sqliteDriver } from '../src/sqlite-driver.ts'
 
 const hash = (key: string) => createHash('sha256').update(key).digest('hex')
 

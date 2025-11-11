@@ -1,6 +1,6 @@
 import { Packr } from 'msgpackr'
-import { KvU64 } from '../kv-u64.js'
-import { type SerializedStruct, defineSerializer } from './serializer.js'
+import { KvU64 } from '../kv-u64.ts'
+import { type SerializedStruct, defineSerializer } from './serializer.ts'
 
 const packr = new Packr({ moreTypes: true })
 

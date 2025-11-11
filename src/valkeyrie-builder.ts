@@ -1,13 +1,13 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import { SchemaRegistry } from './schema-registry.js'
-import type { Serializer } from './serializers/serializer.js'
-import { kFrom, kFromAsync, kOpen } from './symbols.js'
+import { SchemaRegistry } from './schema-registry.ts'
+import type { Serializer } from './serializers/serializer.ts'
+import { kFrom, kFromAsync, kOpen } from './symbols.ts'
 import type {
   SchemaRegistryEntry,
   SchemaRegistry as SchemaRegistryType,
-} from './types/schema-registry-types.js'
-import type { FromOptions, Key } from './valkeyrie.js'
-import { Valkeyrie } from './valkeyrie.js'
+} from './types/schema-registry-types.ts'
+import type { FromOptions, Key } from './valkeyrie.ts'
+import { Valkeyrie } from './valkeyrie.ts'
 
 /**
  * Builder for creating Valkeyrie instances with schema validation.

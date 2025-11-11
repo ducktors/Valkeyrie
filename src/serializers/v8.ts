@@ -1,6 +1,6 @@
 import { deserialize, serialize } from 'node:v8'
-import { KvU64 } from '../kv-u64.js'
-import { type SerializedStruct, defineSerializer } from './serializer.js'
+import { KvU64 } from '../kv-u64.ts'
+import { type SerializedStruct, defineSerializer } from './serializer.ts'
 
 /**
  * Default serializer implementation using Node.js V8 serialization

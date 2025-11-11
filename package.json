@@ -2,54 +2,45 @@
   "name": "valkeyrie",
   "version": "0.8.0",
   "type": "module",
-  "main": "dist/cjs/valkeyrie.js",
-  "module": "dist/esm/valkeyrie.js",
-  "types": "dist/esm/valkeyrie.d.ts",
+  "main": "dist/valkeyrie.js",
+  "module": "dist/valkeyrie.js",
+  "types": "dist/valkeyrie.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/esm/valkeyrie.js",
-      "require": "./dist/cjs/valkeyrie.js",
-      "types": "./dist/esm/valkeyrie.d.ts"
+      "types": "./dist/valkeyrie.d.ts",
+      "default": "./dist/valkeyrie.js"
     },
     "./KvU64": {
-      "import": "./dist/esm/kv-u64.js",
-      "require": "./dist/cjs/kv-u64.js",
-      "types": "./dist/esm/kv-u64.d.ts"
+      "types": "./dist/kv-u64.d.ts",
+      "default": "./dist/kv-u64.js"
     },
     "./driver": {
-      "import": "./dist/esm/driver.js",
-      "require": "./dist/cjs/driver.js",
-      "types": "./dist/esm/driver.d.ts"
+      "types": "./dist/driver.d.ts",
+      "default": "./dist/driver.js"
     },
     "./serializers": {
-      "import": "./dist/esm/serializers/serializer.js",
-      "require": "./dist/cjs/serializers/serializer.js",
-      "types": "./dist/esm/serializers/serializer.d.ts"
+      "types": "./dist/serializers/serializer.d.ts",
+      "default": "./dist/serializers/serializer.js"
     },
     "./serializers/json": {
-      "import": "./dist/esm/serializers/json.js",
-      "require": "./dist/cjs/serializers/json.js",
-      "types": "./dist/esm/serializers/json.d.ts"
+      "types": "./dist/serializers/json.d.ts",
+      "default": "./dist/serializers/json.js"
     },
     "./serializers/v8": {
-      "import": "./dist/esm/serializers/v8.js",
-      "require": "./dist/cjs/serializers/v8.js",
-      "types": "./dist/esm/serializers/v8.d.ts"
+      "types": "./dist/serializers/v8.d.ts",
+      "default": "./dist/serializers/v8.js"
     },
     "./serializers/bson": {
-      "import": "./dist/esm/serializers/bson.js",
-      "require": "./dist/cjs/serializers/bson.js",
-      "types": "./dist/esm/serializers/bson.d.ts"
+      "types": "./dist/serializers/bson.d.ts",
+      "default": "./dist/serializers/bson.js"
     },
     "./serializers/msgpackr": {
-      "import": "./dist/esm/serializers/msgpackr.js",
-      "require": "./dist/cjs/serializers/msgpackr.js",
-      "types": "./dist/esm/serializers/msgpackr.d.ts"
+      "types": "./dist/serializers/msgpackr.d.ts",
+      "default": "./dist/serializers/msgpackr.js"
     },
     "./serializers/cbor-x": {
-      "import": "./dist/esm/serializers/cbor-x.js",
-      "require": "./dist/cjs/serializers/cbor-x.js",
-      "types": "./dist/esm/serializers/cbor-x.d.ts"
+      "types": "./dist/serializers/cbor-x.d.ts",
+      "default": "./dist/serializers/cbor-x.js"
     },
     "./package.json": "./package.json"
   },
@@ -73,9 +64,9 @@
   },
   "packageManager": "pnpm@10.20.0",
   "scripts": {
-    "build": "rimraf ./dist && tsc -p tsconfig.build.json && tsc -p tsconfig.cjs.json && cp cjs-package.json dist/cjs/package.json",
+    "build": "rimraf ./dist && tsc -p tsconfig.build.json",
     "validate-exports": "validate-package-exports --check --verify --info",
-    "postbuild": "npm run validate-exports",
+    "postbuild": "pnpm run validate-exports",
     "lint": "biome check src test",
     "fmt": "biome format src test",
     "release": "pnpm run build && changeset publish",
@@ -83,9 +74,9 @@
     "commit": "npx git-cz --disable-emoji",
     "prepare": "husky",
     "check-updates": "pnpm outdated --recursive --long",
-    "test": "tsc --noEmit && tsx --test ./test/*.ts",
-    "test:watch": "tsc --noEmit && tsx --watch --test \"./test/*.ts\"",
-    "test:coverage": "tsc --noEmit && c8 --all --src src --reporter lcov --reporter text tsx --test ./test/*.ts"
+    "test": "tsc --noEmit && node --test ./test/*.ts",
+    "test:watch": "tsc --noEmit && node --watch --test ./test/*.ts",
+    "test:coverage": "tsc --noEmit && c8 --all --src src --reporter lcov --reporter text node --test ./test/*.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
@@ -104,7 +95,6 @@
     "husky": "^9.1.7",
     "lint-staged": "^15.4.3",
     "rimraf": "^6.0.1",
-    "tsx": "^4.19.3",
     "typescript": "^5.8.2",
     "valibot": "^1.1.0",
     "validate-package-exports": "^0.8.0",
