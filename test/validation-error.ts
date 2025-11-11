@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
-import { ValidationError } from '../src/validation-error.js'
+import { ValidationError } from '../src/validation-error.ts'
 
 describe('ValidationError', () => {
   describe('Basic Error Construction', () => {

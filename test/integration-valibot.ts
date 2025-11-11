@@ -1,8 +1,8 @@
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
 import * as v from 'valibot'
-import { ValidationError } from '../src/validation-error.js'
-import { type EntryMaybe, Valkeyrie } from '../src/valkeyrie.js'
+import { ValidationError } from '../src/validation-error.ts'
+import { type EntryMaybe, Valkeyrie } from '../src/valkeyrie.ts'
 
 describe('Integration with Valibot', () => {
   describe('Basic Schema Validation', () => {

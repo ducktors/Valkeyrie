@@ -1,11 +1,11 @@
 import { serialize } from 'node:v8'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import type { Driver } from './driver.js'
-import { KvU64 } from './kv-u64.js'
-import type { SchemaRegistry } from './schema-registry.js'
-import { validateReservedKeyParts, validateValue } from './schema-validator.js'
-import type { Serializer } from './serializers/serializer.js'
-import { sqliteDriver } from './sqlite-driver.js'
+import type { Driver } from './driver.ts'
+import { KvU64 } from './kv-u64.ts'
+import type { SchemaRegistry } from './schema-registry.ts'
+import { validateReservedKeyParts, validateValue } from './schema-validator.ts'
+import type { Serializer } from './serializers/serializer.ts'
+import { sqliteDriver } from './sqlite-driver.ts'
 import {
   kCommitVersionstamp,
   kFrom,
@@ -13,13 +13,13 @@ import {
   kOpen,
   kSchemaRegistry,
   kValkeyrie,
-} from './symbols.js'
+} from './symbols.ts'
 import type {
   InferTypeForKey,
   InferTypeForPrefix,
   SchemaRegistry as SchemaRegistryType,
-} from './types/schema-registry-types.js'
-import { ValkeyrieBuilder } from './valkeyrie-builder.js'
+} from './types/schema-registry-types.ts'
+import { ValkeyrieBuilder } from './valkeyrie-builder.ts'
 
 export type KeyPart = Uint8Array | string | number | bigint | boolean | symbol
 export type Key = readonly KeyPart[]

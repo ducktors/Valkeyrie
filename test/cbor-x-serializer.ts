@@ -1,8 +1,8 @@
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
-import { KvU64 } from '../src/kv-u64.js'
-import { cborXSerializer } from '../src/serializers/cbor-x.js'
-import { type Key, type Mutation, Valkeyrie } from '../src/valkeyrie.js'
+import { KvU64 } from '../src/kv-u64.ts'
+import { cborXSerializer } from '../src/serializers/cbor-x.ts'
+import { type Key, type Mutation, Valkeyrie } from '../src/valkeyrie.ts'
 
 describe('cbor-x serializer', async () => {
   async function dbTest(

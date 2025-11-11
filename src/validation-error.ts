@@ -1,4 +1,4 @@
-import type { Key } from './valkeyrie.js'
+import type { Key } from './valkeyrie.ts'
 
 /**
  * Error thrown when validation fails for a value.

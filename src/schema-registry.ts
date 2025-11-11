@@ -1,5 +1,5 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import type { Key } from './valkeyrie.js'
+import type { Key } from './valkeyrie.ts'
 
 interface SchemaEntry {
   pattern: Key

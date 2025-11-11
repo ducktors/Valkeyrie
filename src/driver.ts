@@ -1,4 +1,4 @@
-import type { Serializer } from './serializers/serializer.js'
+import type { Serializer } from './serializers/serializer.ts'
 
 export interface Driver {
   close: () => Promise<void>

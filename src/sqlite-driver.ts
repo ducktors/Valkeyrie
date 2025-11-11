@@ -1,9 +1,9 @@
 import { unlink } from 'node:fs/promises'
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import { setTimeout } from 'node:timers/promises'
-import { type DriverValue, defineDriver } from './driver.js'
-import type { Serializer } from './serializers/serializer.js'
-import { v8Serializer } from './serializers/v8.js'
+import { type DriverValue, defineDriver } from './driver.ts'
+import type { Serializer } from './serializers/serializer.ts'
+import { v8Serializer } from './serializers/v8.ts'
 
 type SqlRow = Pick<DriverValue, 'versionstamp'> & {
   key_hash: string

@@ -1,6 +1,6 @@
-import type { SchemaRegistry } from './schema-registry.js'
-import { ValidationError } from './validation-error.js'
-import type { Key } from './valkeyrie.js'
+import type { SchemaRegistry } from './schema-registry.ts'
+import { ValidationError } from './validation-error.ts'
+import type { Key } from './valkeyrie.ts'
 
 /**
  * Validates a value against a schema found in the registry for the given key.

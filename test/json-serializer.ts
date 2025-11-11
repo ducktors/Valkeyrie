@@ -1,8 +1,8 @@
 import assert from 'node:assert'
 import { describe, test } from 'node:test'
-import { KvU64 } from '../src/kv-u64.js'
-import { jsonSerializer } from '../src/serializers/json.js'
-import { type Key, type Mutation, Valkeyrie } from '../src/valkeyrie.js'
+import { KvU64 } from '../src/kv-u64.ts'
+import { jsonSerializer } from '../src/serializers/json.ts'
+import { type Key, type Mutation, Valkeyrie } from '../src/valkeyrie.ts'
 describe('json serializer', async () => {
   async function dbTest(
     name: string,
