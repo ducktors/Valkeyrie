@@ -1,5 +1,13 @@
 # valkeyrie
 
+## 0.8.1
+
+### Patch Changes
+
+- 99ba459: Remove c8 in favor of native coverage
+- 8559588: Build only ESM and drop tsx
+- f92c806: chore: remove benchmarks
+
 ## 0.8.0
 
 ### Minor Changes
