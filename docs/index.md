@@ -78,7 +78,7 @@ yarn add valkeyrie
 Create a type-safe key-value store with schema validation:
 
 ```typescript
-import { ValkeyrieBuilder } from 'valkeyrie'
+import { Valkeyrie } from 'valkeyrie'
 import { z } from 'zod'
 
 // Define your schema with Zod (or Valibot, ArkType, etc.)
@@ -88,23 +88,30 @@ const userSchema = z.object({
   age: z.number().min(0)
 })
 
-// Create a Valkeyrie instance
-const kv = new ValkeyrieBuilder()
-  .withDriver('sqlite', { path: './my-data.db' })
-  .build()
-
-// Define a key with a schema
-const userKey = kv.key('user', userSchema)
+// Register the schema and open the database
+const db = await Valkeyrie
+  .withSchema(['users', '*'], userSchema)
+  .open('./my-data.db')
 
 // Set a value - automatically validated!
-await userKey.set({ name: 'Alice', email: 'alice@example.com', age: 30 })
+await db.set(['users', 'alice'], {
+  name: 'Alice',
+  email: 'alice@example.com',
+  age: 30
+})
 
 // Get the value - fully typed!
-const user = await userKey.get() // Type: { name: string, email: string, age: number } | null
+const user = await db.get(['users', 'alice'])
+// user.value type: { name: string, email: string, age: number } | null
+
+// List all users with prefix
+for await (const entry of db.list({ prefix: ['users'] })) {
+  console.log('User:', entry.value)
+}
 
 // Watch for changes
-for await (const entry of userKey.watch()) {
-  console.log('User updated:', entry.value)
+for await (const entries of db.watch([['users', 'alice']])) {
+  console.log('User updated:', entries[0].value)
 }
 ```
 
