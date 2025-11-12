@@ -1,0 +1,33 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["./src/valkeyrie.ts"],
+  "out": "docs/api/generated",
+  "plugin": ["typedoc-plugin-markdown"],
+  "readme": "none",
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "excludeExternals": true,
+  "sort": ["source-order"],
+  "kindSortOrder": [
+    "Class",
+    "Interface",
+    "TypeAlias",
+    "Function",
+    "Variable",
+    "Property",
+    "Method"
+  ],
+  "navigationLinks": {
+    "Documentation": "https://ducktors.github.io/valkeyrie/",
+    "GitHub": "https://github.com/ducktors/valkeyrie"
+  },
+  "githubPages": false,
+  "hideGenerator": true,
+  "hidePageHeader": false,
+  "hidePageTitle": false,
+  "hideBreadcrumbs": false,
+  "useCodeBlocks": true,
+  "expandObjects": true,
+  "expandParameters": true,
+  "entryFileName": "index.md"
+}

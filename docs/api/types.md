@@ -435,7 +435,7 @@ if (result.ok) {
 
 ## Generic Type Parameters
 
-### Valkeyrie<TRegistry>
+### Valkeyrie&lt;TRegistry&gt;
 
 ```typescript
 class Valkeyrie<TRegistry extends SchemaRegistryType = readonly []>

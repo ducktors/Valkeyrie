@@ -1,6 +1,6 @@
 # Serializers
 
-Serializers determine how your data is stored in the SQLite database. Valkeyrie supports multiple serializers, each with different trade-offs.
+Serializers determine how your data is stored in the database. Valkeyrie supports multiple serializers, each with different trade-offs.
 
 ## Table of Contents
 
@@ -15,10 +15,10 @@ Serializers determine how your data is stored in the SQLite database. Valkeyrie 
 
 ## Overview
 
-When you store data in Valkeyrie, it's converted to binary format before being saved to SQLite. Serializers handle this conversion:
+When you store data in Valkeyrie, it's converted to binary format before being saved to the underlying storage. Serializers handle this conversion:
 
 ```
-JavaScript Value  →  [Serializer]  →  Binary Data  →  SQLite
+JavaScript Value  →  [Serializer]  →  Binary Data  →  Storage
                       ↑
                   Your choice!
 ```
@@ -199,7 +199,7 @@ Need to inspect data manually?
    │     └─ No → MessagePack Serializer
    └─ No
       Have circular references?
-      ├─ Yes → V8 Serializer (only option)
+      ├─ Yes → V8 Serializer
       └─ No
          Need absolute best performance?
          ├─ Yes → CBOR-X or V8 Serializer
@@ -539,8 +539,6 @@ const db = await Valkeyrie.open('./data.db', {
 ```
 
 ## Summary
-
-You've learned:
 
 - ✅ What serializers do and why they matter
 - ✅ The five built-in serializers and their trade-offs

@@ -92,6 +92,11 @@ dist
 # vuepress build output
 .vuepress/dist
 
+# VitePress build output and cache
+docs/.vitepress/cache
+docs/.vitepress/dist
+docs/api/generated
+
 # Serverless directories
 .serverless/
 
