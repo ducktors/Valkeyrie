@@ -4,14 +4,9 @@ Welcome to Valkeyrie! This guide will walk you through everything you need to kn
 
 ## What is Valkeyrie?
 
-Valkeyrie is a key-value database that runs entirely in your Node.js process. It's built on SQLite, which means it's:
+Valkeyrie is a **type-safe** key-value database that provides **runtime schema validation** and **automatic TypeScript type inference** through the Standard Schema specification, working seamlessly with Zod, Valibot, ArkType, and other validation libraries.
 
-- **Fast** - No network calls, everything happens in-process
-- **Reliable** - Built on battle-tested SQLite
-- **Simple** - No database server to set up or manage
-- **Portable** - Just a single file on disk (or in-memory)
-
-Valkeyrie is inspired by [Deno.kv](https://deno.com/kv) and brings a similar developer-friendly API to Node.js.
+Valkeyrie's API is inspired by [Deno.kv](https://deno.com/kv).
 
 ## Installation
 
@@ -22,11 +17,9 @@ pnpm add valkeyrie
 # Using npm
 npm install valkeyrie
 
-# Using yarn
-yarn add valkeyrie
 ```
 
-Valkeyrie requires Node.js 20 or higher.
+Valkeyrie requires Node.js 22 or higher.
 
 ## Your First Database
 
@@ -49,11 +42,9 @@ console.log(entry.value); // 'Hello, Valkeyrie!'
 await db.close();
 ```
 
-That's it! You've just created your first Valkeyrie database.
-
 ## In-Memory vs File-Based
 
-Valkeyrie supports two modes:
+Out of the box, Valkeyrie supports two modes:
 
 ### In-Memory Database
 
@@ -323,9 +314,9 @@ await db.destroy();
 await db.close();
 ```
 
-### Automatic Cleanup with `using`
+### Automatic Cleanup with `await using`
 
-Valkeyrie supports the explicit resource management proposal:
+Valkeyrie supports the explicit resource management proposal (on Node.js v24):
 
 ```typescript
 {
@@ -407,7 +398,7 @@ try {
 }
 ```
 
-Or use explicit resource management:
+Or use explicit resource management (on Node.js v24):
 
 ```typescript
 await using db = await Valkeyrie.open('./app.db');
@@ -558,9 +549,6 @@ While there's no hard size limit, extremely large values (> 10MB) may impact per
 - Using compression for large text data
 
 ## Summary
-
-You've learned:
-
 - ✅ How to open and close databases
 - ✅ Understanding hierarchical keys
 - ✅ Setting, getting, and deleting values
@@ -568,5 +556,3 @@ You've learned:
 - ✅ Using data expiration
 - ✅ Basic error handling
 - ✅ Common patterns and best practices
-
-Continue your journey with our other guides to unlock more powerful features!

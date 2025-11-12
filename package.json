@@ -1,6 +1,7 @@
 {
   "name": "valkeyrie",
   "version": "0.8.1",
+  "description": "Type-safe key-value store with atomic transactions, Standard Schema validation and pluggable drivers.",
   "type": "module",
   "main": "dist/valkeyrie.js",
   "module": "dist/valkeyrie.js",
@@ -47,9 +48,21 @@
   "author": "Maksim Sinik <maksim@sinik.it>",
   "license": "MIT",
   "keywords": [
-    "kv-db",
+    "key-value",
     "kv",
-    "keyvalue"
+    "typescript",
+    "schema-validation",
+    "sqlite",
+    "database",
+    "atomic-transactions",
+    "watch-api",
+    "storage",
+    "embedded-database",
+    "standard-schema",
+    "zod",
+    "valibot",
+    "arktype",
+    "serialization"
   ],
   "engines": {
     "node": ">=22"
@@ -76,7 +89,11 @@
     "check-updates": "pnpm outdated --recursive --long",
     "test": "tsc && node --test ./test/*.ts",
     "test:watch": "tsc && node --watch --test ./test/*.ts",
-    "test:coverage": "tsc && mkdir -p coverage && node --test --experimental-test-coverage --test-reporter=spec --test-reporter=lcov --test-reporter-destination=stdout --test-reporter-destination=coverage/lcov.info --test-coverage-exclude=src/types/** --test-coverage-exclude=test/** ./test/*.ts"
+    "test:coverage": "tsc && mkdir -p coverage && node --test --experimental-test-coverage --test-reporter=spec --test-reporter=lcov --test-reporter-destination=stdout --test-reporter-destination=coverage/lcov.info --test-coverage-exclude=src/types/** --test-coverage-exclude=test/** ./test/*.ts",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
+    "docs:api": "typedoc --out docs/api/generated --plugin typedoc-plugin-markdown"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
@@ -94,9 +111,12 @@
     "husky": "^9.1.7",
     "lint-staged": "^15.4.3",
     "rimraf": "^6.0.1",
+    "typedoc": "^0.28.14",
+    "typedoc-plugin-markdown": "^4.9.0",
     "typescript": "^5.8.2",
     "valibot": "^1.1.0",
     "validate-package-exports": "^0.8.0",
+    "vitepress": "^1.6.4",
     "zod": "^4.1.12"
   },
   "files": [

@@ -209,7 +209,7 @@ const db = await Valkeyrie
   .open();
 ```
 
-All three produce the same validation behavior!
+All three produce the same validation behavior.
 
 ## Pattern Matching
 
@@ -793,9 +793,7 @@ const db = await Valkeyrie
   .open();
 ```
 
-## Limitations
-
-Current limitations to be aware of:
+## Notes on validation
 
 1. **Write-time only** - Validation only occurs on writes, not reads
 2. **No schema migration** - Changing schemas doesn't validate existing data
@@ -803,8 +801,6 @@ Current limitations to be aware of:
 4. **No cross-key validation** - Cannot validate relationships between different keys
 
 ## Summary
-
-You've learned:
 
 - ✅ How to add schema validation with Zod, Valibot, or ArkType
 - ✅ Automatic TypeScript type inference from schemas

@@ -784,8 +784,6 @@ class DatabasePool {
 
 ## Summary
 
-You've learned:
-
 - ✅ Real-time monitoring with the Watch API
 - ✅ Atomic operations for consistency
 - ✅ Optimistic concurrency control

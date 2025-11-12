@@ -8,9 +8,11 @@
 
 [![GitHub package.json version](https://img.shields.io/github/package-json/v/ducktors/Valkeyrie)](https://github.com/ducktors/Valkeyrie/releases) ![node:22.14.0](https://img.shields.io/badge/node-22.14.0-lightgreen) ![pnpm@10.20.0](https://img.shields.io/badge/pnpm-10.20.0-yellow) [![npm](https://img.shields.io/npm/dt/valkeyrie)](https://www.npmjs.com/package/valkeyrie) [![CI](https://github.com/ducktors/Valkeyrie/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ducktors/Valkeyrie/actions/workflows/ci.yml) [![Test](https://github.com/ducktors/Valkeyrie/actions/workflows/test.yaml/badge.svg?branch=main)](https://github.com/ducktors/Valkeyrie/actions/workflows/test.yaml) [![Coverage Status](https://coveralls.io/repos/github/ducktors/Valkeyrie/badge.svg)](https://coveralls.io/github/ducktors/Valkeyrie) [![Maintainability](https://api.codeclimate.com/v1/badges/c1a77d6d8b158d442572/maintainability)](https://codeclimate.com/github/ducktors/valkeyrie/maintainability) [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/ducktors/Valkeyrie/badge)](https://scorecard.dev/viewer/?uri=github.com/ducktors/valkeyrie) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/10163/badge)](https://www.bestpractices.dev/projects/10163)
 
-Valkeyrie is a high-performance key-value store for Node.js applications that solves the problem of efficient data storage and retrieval in JavaScript environments. It brings the powerful Deno.kv API to Node.js, enabling developers to store complex data structures with atomic guarantees without the complexity of setting up external databases. Whether you need a lightweight database for your application, a caching layer, or a way to persist application state, Valkeyrie provides a simple yet powerful solution built on SQLite.
+Valkeyrie is a type-safe, key-value store for Node.js that combines runtime schema validation with pluggable storage drivers. Built with Standard Schema support, it provides automatic TypeScript type inference and first-class runtime schema validation.
 
-This is a work in progress, but the API and everything already implemented is stable and ready for production.
+This is still a work in progress, but the API and everything already implemented is stable and ready for production.
+
+📚 **[Documentation](https://ducktors.github.io/valkeyrie/)** | [Getting Started](https://ducktors.github.io/valkeyrie/guides/getting-started) | [API Reference](https://ducktors.github.io/valkeyrie/api/api-reference)
 
 ## Table of Contents
 
@@ -27,18 +29,17 @@ This is a work in progress, but the API and everything already implemented is st
 
 ## Features
 
-- **Simple and intuitive API** - Easy to learn and use, inspired by Deno.kv
-- **Type-safe** - Full TypeScript support with schema-based type inference
-- **Factory functions** - Create and populate databases from arrays, iterables, and async sources
-- **Schema validation** - Runtime validation with Zod, Valibot, ArkType, and other Standard Schema libraries
-- **Rich data type support** - Store objects, arrays, dates, binary data, and more
-- **Hierarchical keys** - Organize data with multi-part keys for efficient querying
+- **Type-safe with schema validation** - Runtime validation with Zod, Valibot, ArkType, and other Standard Schema libraries
+- **Automatic type inference** - Full TypeScript support with schema-based type inference across all operations
 - **Atomic operations** - Perform multiple operations in a single transaction with optimistic locking
 - **Real-time updates** - Watch keys for changes with the `watch()` API
+- **Pluggable storage drivers** - Currently SQLite-based, with support for more drivers coming soon
+- **Rich data type support** - Store objects, arrays, dates, binary data, Maps, Sets, and more
+- **Hierarchical keys** - Organize data with multi-part keys for efficient querying
 - **Efficient querying** - List data with prefix and range queries
 - **Data expiration** - Set time-to-live for values with automatic cleanup
-- **High performance** - Built on SQLite with optimized operations and multiple serializer options
 - **Multi-instance safe** - Proper concurrency control for multiple process access
+- **Simple and intuitive API** - Inspired by Deno.kv for a familiar, easy-to-learn interface
 
 ## Installation
 
@@ -48,9 +49,6 @@ pnpm add valkeyrie
 
 # Using npm
 npm install valkeyrie
-
-# Using yarn
-yarn add valkeyrie
 ```
 
 ## Quick Start
@@ -81,7 +79,7 @@ for await (const entry of db.list({ prefix: ['users'] })) {
 await db.close();
 ```
 
-That's it! You now have a working key-value store. For more examples, see the sections below or check out the [complete documentation](./docs/guides/getting-started.md).
+For more examples, see the sections below or check out the [complete documentation](./docs/guides/getting-started.md).
 
 ## Core Concepts
 

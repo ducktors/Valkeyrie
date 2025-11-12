@@ -824,8 +824,6 @@ const db = await Valkeyrie
 
 ## Summary
 
-You've learned:
-
 - ✅ How to create databases from arrays, Sets, Maps, and custom iterables
 - ✅ How to stream large datasets efficiently with `fromAsync()`
 - ✅ Key extraction strategies and options

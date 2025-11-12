@@ -90,17 +90,7 @@ Complete technical reference:
 
 ## What's New
 
-Recent additions to Valkeyrie (check the [CHANGELOG](../CHANGELOG.md) for full history):
-
-### Version 0.7.x
-- **Multi-instance concurrency improvements** - Safe database sharing across processes
-- **Type inference** - Automatic TypeScript types from schemas for `get()`, `set()`, `list()`, and `watch()`
-- **Schema validation** - Builder pattern with `withSchema()`
-- **Factory methods** - `from()` and `fromAsync()` for bulk imports
-
-### Version 0.5.x
-- **Watch API** - Real-time key monitoring with Web Streams
-- **Transaction fixes** - Proper multi-client concurrency
+Recent additions to Valkeyrie (check the [CHANGELOG](https://github.com/ducktors/valkeyrie/blob/main/CHANGELOG.md) for full history):
 
 ## Examples by Use Case
 
@@ -180,16 +170,9 @@ Main differences:
 - Pluggable serializers
 - Factory methods (`from`/`fromAsync`)
 
-### From the Old Documentation
-
-If you're looking for content from the previous `documentation.md` file:
-- It has been archived as `documentation.md.old`
-- All content has been reorganized into focused guides
-- Use this README to find the equivalent new location
-
 ## Contributing to Documentation
 
-Found an issue or want to improve the docs? See [CONTRIBUTING.md](../CONTRIBUTING.md).
+Found an issue or want to improve the docs? See [CONTRIBUTING.md](https://github.com/ducktors/valkeyrie/blob/main/CONTRIBUTING.md).
 
 ### Documentation Structure
 
@@ -202,10 +185,9 @@ docs/
 │   ├── factory-methods.md      # Data import guide
 │   ├── serializers.md          # Serialization guide
 │   └── advanced-patterns.md    # Advanced features
-├── api/                         # API reference
-│   ├── api-reference.md        # Method reference
-│   └── types.md                # Type definitions
-└── documentation.md.old         # Archived old docs
+└── api/                         # API reference
+    ├── api-reference.md        # Method reference
+    └── types.md                # Type definitions
 ```
 
 ## Getting Help
@@ -216,4 +198,4 @@ docs/
 
 ## License
 
-Valkeyrie is MIT licensed. See [LICENSE](../LICENSE) for details.
+Valkeyrie is MIT licensed. See [LICENSE](https://github.com/ducktors/valkeyrie/blob/main/LICENSE) for details.
