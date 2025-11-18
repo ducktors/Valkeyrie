@@ -1,5 +1,11 @@
 # valkeyrie
 
+## 0.8.2
+
+### Patch Changes
+
+- a0abc46: Add documentation website
+
 ## 0.8.1
 
 ### Patch Changes
