@@ -1,5 +1,12 @@
 # valkeyrie
 
+## 0.8.2
+
+### Patch Changes
+
+- a0abc46: Add documentation website
+- a22d008: fix: list() prefix type inference now returns union of all matching schemas
+
 ## 0.8.1
 
 ### Patch Changes
