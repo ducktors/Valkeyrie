@@ -801,6 +801,57 @@ describe('Integration with Zod', () => {
       assert.strictEqual(postCount, 1, 'Found one post')
       await db.close()
     })
+
+    test('list() with ambiguous prefix returns union type', async () => {
+      const db = await Valkeyrie.withSchema(
+        ['workflows', '*', 'versions', '*'] as const,
+        z.object({ name: z.string() }),
+      )
+        .withSchema(['workflows', '*', 'executions', '*'] as const, z.string())
+        .withSchema(['workflows', '*'] as const, z.number())
+        .open()
+
+      // Set up test data
+      await db.set(['workflows', '123'], 42)
+      await db.set(['workflows', '123', 'versions', 'v1'], { name: 'test' })
+      await db.set(['workflows', '123', 'executions', 'exec1'], 'runId-123')
+
+      // list() with prefix ['workflows'] should return all three types
+      const entries: Array<{ name: string } | string | number> = []
+      for await (const entry of db.list({ prefix: ['workflows'] })) {
+        // Type should be: number | { name: string } | string (union type)
+        const value: number | { name: string } | string = entry.value
+        entries.push(value)
+      }
+
+      assert.strictEqual(entries.length, 3, 'Found all three entries')
+      await db.close()
+    })
+
+    test('list() with specific prefix returns narrowed type', async () => {
+      const db = await Valkeyrie.withSchema(
+        ['workflows', '*', 'versions', '*'] as const,
+        z.object({ name: z.string() }),
+      )
+        .withSchema(['workflows', '*', 'executions', '*'] as const, z.string())
+        .withSchema(['workflows', '*'] as const, z.number())
+        .open()
+
+      // Set up test data
+      await db.set(['workflows', '123', 'executions', 'exec1'], 'runId-123')
+      await db.set(['workflows', '123', 'executions', 'exec2'], 'runId-456')
+
+      // list() with specific prefix should only match one pattern
+      for await (const entry of db.list({
+        prefix: ['workflows', '123', 'executions'],
+      })) {
+        // Type should be just: string
+        const value: string = entry.value
+        assert.strictEqual(typeof value, 'string')
+      }
+
+      await db.close()
+    })
   })
 
   describe('watch() Operations', () => {

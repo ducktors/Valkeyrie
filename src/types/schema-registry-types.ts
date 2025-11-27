@@ -88,6 +88,7 @@ export type InferTypeForKey<
  * For example:
  * - Pattern ['users', '*'] starts with prefix ['users']
  * - Pattern ['users', '*', 'posts'] starts with prefix ['users']
+ * - Pattern ['users', '*', 'posts'] starts with prefix ['users', '123']
  */
 type PatternStartsWithPrefix<
   TPattern extends Key,
@@ -96,42 +97,51 @@ type PatternStartsWithPrefix<
   ? true
   : TPrefix extends readonly [infer PFirst, ...infer PRest]
     ? TPattern extends readonly [infer PatFirst, ...infer PatRest]
-      ? PFirst extends PatFirst
+      ? PatFirst extends '*'
         ? PatternStartsWithPrefix<
             PatRest extends Key ? PatRest : never,
             PRest extends Key ? PRest : never
           >
-        : false
+        : PFirst extends PatFirst
+          ? PatternStartsWithPrefix<
+              PatRest extends Key ? PatRest : never,
+              PRest extends Key ? PRest : never
+            >
+          : false
       : false
     : false
 
 /**
- * Finds the first schema in the registry whose pattern starts with the given prefix
+ * Finds all schemas in the registry whose patterns start with the given prefix
+ * Accumulates them into a union type to reflect runtime behavior where
+ * list() returns entries matching any pattern that starts with the prefix
  */
-type FindSchemaForPrefix<
+type FindAllSchemasForPrefix<
   TRegistry extends SchemaRegistry,
   TPrefix extends Key,
+  Acc = never,
 > = TRegistry extends readonly [
   infer First extends SchemaRegistryEntry,
   ...infer Rest extends SchemaRegistry,
 ]
   ? First extends readonly [infer Pattern extends Key, infer Schema]
     ? PatternStartsWithPrefix<Pattern, TPrefix> extends true
-      ? Schema
-      : FindSchemaForPrefix<Rest, TPrefix>
-    : never
-  : never
+      ? FindAllSchemasForPrefix<Rest, TPrefix, Acc | Schema>
+      : FindAllSchemasForPrefix<Rest, TPrefix, Acc>
+    : Acc
+  : Acc
 
 /**
  * Infers the output type for entries returned by list() with a given prefix
+ * Returns a union of all possible schema outputs that could match the prefix
  * Returns unknown if no schema pattern matches the prefix
  */
 export type InferTypeForPrefix<
   TRegistry extends SchemaRegistry,
   TPrefix extends Key,
-> = FindSchemaForPrefix<TRegistry, TPrefix> extends never
+> = [FindAllSchemasForPrefix<TRegistry, TPrefix>] extends [never]
   ? unknown
-  : InferSchemaOutput<FindSchemaForPrefix<TRegistry, TPrefix>>
+  : InferSchemaOutput<FindAllSchemasForPrefix<TRegistry, TPrefix>>
 
 /**
  * Maps an array of keys to their inferred types
