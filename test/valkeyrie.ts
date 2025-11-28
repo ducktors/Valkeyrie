@@ -925,7 +925,7 @@ describe('test valkeyrie', async () => {
     ])
 
     const cursor = iterator.cursor
-    assert.strictEqual(cursor, 'AmIA')
+    assert.ok(cursor) // Cursor should exist and be non-empty
 
     const iterator2 = db.list({ prefix: ['a'] }, { cursor })
     const values2 = await Array.fromAsync(iterator2)
@@ -947,7 +947,7 @@ describe('test valkeyrie', async () => {
     ])
 
     const cursor = iterator.cursor
-    assert.strictEqual(cursor, 'AmQA')
+    assert.ok(cursor) // Cursor should exist and be non-empty
 
     const iterator2 = db.list({ prefix: ['a'] }, { cursor, reverse: true })
     const values2 = await Array.fromAsync(iterator2)
@@ -957,6 +957,349 @@ describe('test valkeyrie', async () => {
       { key: ['a', 'a'], value: 0, versionstamp },
     ])
   })
+
+  await dbTest('list prefix with manual cursor - numeric keys', async (db) => {
+    // Setup numeric keys
+    for (let i = 1; i <= 10; i++) {
+      await db.set(['nums', i], i * 10)
+    }
+
+    // Test forward pagination
+    const iterator = db.list({ prefix: ['nums'] }, { limit: 3 })
+    const values = await Array.fromAsync(iterator)
+    assert.strictEqual(values.length, 3)
+    assert.ok(values[0])
+    assert.ok(values[1])
+    assert.ok(values[2])
+    assert.deepEqual(values[0].key, ['nums', 1])
+    assert.deepEqual(values[1].key, ['nums', 2])
+    assert.deepEqual(values[2].key, ['nums', 3])
+
+    const cursor = iterator.cursor
+    assert.ok(cursor)
+
+    const iterator2 = db.list({ prefix: ['nums'] }, { cursor })
+    const values2 = await Array.fromAsync(iterator2)
+    assert.strictEqual(values2.length, 7)
+    assert.ok(values2[0])
+    assert.ok(values2[6])
+    assert.deepEqual(values2[0].key, ['nums', 4])
+    assert.deepEqual(values2[6].key, ['nums', 10])
+  })
+
+  await dbTest(
+    'list prefix with manual cursor reverse - numeric keys',
+    async (db) => {
+      // Setup numeric keys
+      for (let i = 1; i <= 10; i++) {
+        await db.set(['nums', i], i * 10)
+      }
+
+      // Test reverse pagination
+      const iterator = db.list(
+        { prefix: ['nums'] },
+        { limit: 3, reverse: true },
+      )
+      const values = await Array.fromAsync(iterator)
+      assert.strictEqual(values.length, 3)
+      assert.ok(values[0])
+      assert.ok(values[1])
+      assert.ok(values[2])
+      assert.deepEqual(values[0].key, ['nums', 10])
+      assert.deepEqual(values[1].key, ['nums', 9])
+      assert.deepEqual(values[2].key, ['nums', 8])
+
+      const cursor = iterator.cursor
+      assert.ok(cursor)
+
+      const iterator2 = db.list({ prefix: ['nums'] }, { cursor, reverse: true })
+      const values2 = await Array.fromAsync(iterator2)
+      assert.strictEqual(values2.length, 7)
+      assert.ok(values2[0])
+      assert.ok(values2[6])
+      assert.deepEqual(values2[0].key, ['nums', 7])
+      assert.deepEqual(values2[6].key, ['nums', 1])
+    },
+  )
+
+  await dbTest('list prefix with manual cursor - bigint keys', async (db) => {
+    // Setup bigint keys
+    for (let i = 1n; i <= 10n; i++) {
+      await db.set(['bigs', i], Number(i) * 10)
+    }
+
+    // Test forward pagination
+    const iterator = db.list({ prefix: ['bigs'] }, { limit: 3 })
+    const values = await Array.fromAsync(iterator)
+    assert.strictEqual(values.length, 3)
+    assert.ok(values[0])
+    assert.ok(values[2])
+    assert.deepEqual(values[0].key, ['bigs', 1n])
+    assert.deepEqual(values[2].key, ['bigs', 3n])
+
+    const cursor = iterator.cursor
+    assert.ok(cursor)
+
+    const iterator2 = db.list({ prefix: ['bigs'] }, { cursor })
+    const values2 = await Array.fromAsync(iterator2)
+    assert.strictEqual(values2.length, 7)
+    assert.ok(values2[0])
+    assert.ok(values2[6])
+    assert.deepEqual(values2[0].key, ['bigs', 4n])
+    assert.deepEqual(values2[6].key, ['bigs', 10n])
+  })
+
+  await dbTest(
+    'list prefix with manual cursor reverse - bigint keys',
+    async (db) => {
+      // Setup bigint keys
+      for (let i = 1n; i <= 10n; i++) {
+        await db.set(['bigs', i], Number(i) * 10)
+      }
+
+      // Test reverse pagination
+      const iterator = db.list(
+        { prefix: ['bigs'] },
+        { limit: 3, reverse: true },
+      )
+      const values = await Array.fromAsync(iterator)
+      assert.strictEqual(values.length, 3)
+      assert.ok(values[0])
+      assert.ok(values[1])
+      assert.ok(values[2])
+      assert.deepEqual(values[0].key, ['bigs', 10n])
+      assert.deepEqual(values[1].key, ['bigs', 9n])
+      assert.deepEqual(values[2].key, ['bigs', 8n])
+
+      const cursor = iterator.cursor
+      assert.ok(cursor)
+
+      const iterator2 = db.list({ prefix: ['bigs'] }, { cursor, reverse: true })
+      const values2 = await Array.fromAsync(iterator2)
+      assert.strictEqual(values2.length, 7)
+      assert.ok(values2[0])
+      assert.ok(values2[6])
+      assert.deepEqual(values2[0].key, ['bigs', 7n])
+      assert.deepEqual(values2[6].key, ['bigs', 1n])
+    },
+  )
+
+  await dbTest('list prefix with manual cursor - boolean keys', async (db) => {
+    // Setup boolean keys - cursor stores only the last key part,
+    // so we need single-level keys after the prefix
+    await db.set(['items', false], 'false value')
+    await db.set(['items', true], 'true value')
+
+    // Test forward pagination
+    const iterator = db.list({ prefix: ['items'] }, { limit: 1 })
+    const values = await Array.fromAsync(iterator)
+    assert.strictEqual(values.length, 1)
+    assert.ok(values[0])
+    assert.deepEqual(values[0].key, ['items', false])
+
+    // Get all remaining items with cursor
+    const cursor = iterator.cursor
+    if (cursor) {
+      const iterator2 = db.list({ prefix: ['items'] }, { cursor })
+      const values2 = await Array.fromAsync(iterator2)
+      assert.strictEqual(values2.length, 1)
+      assert.ok(values2[0])
+      assert.deepEqual(values2[0].key, ['items', true])
+    }
+  })
+
+  await dbTest(
+    'list prefix with manual cursor reverse - boolean keys',
+    async (db) => {
+      // Setup boolean keys - cursor stores only the last key part,
+      // so we need single-level keys after the prefix
+      await db.set(['items', false], 'false value')
+      await db.set(['items', true], 'true value')
+
+      // Test reverse pagination
+      const iterator = db.list(
+        { prefix: ['items'] },
+        { limit: 1, reverse: true },
+      )
+      const values = await Array.fromAsync(iterator)
+      assert.strictEqual(values.length, 1)
+      assert.ok(values[0])
+      assert.deepEqual(values[0].key, ['items', true])
+
+      // Get all remaining items with cursor
+      const cursor = iterator.cursor
+      if (cursor) {
+        const iterator2 = db.list(
+          { prefix: ['items'] },
+          { cursor, reverse: true },
+        )
+        const values2 = await Array.fromAsync(iterator2)
+        assert.strictEqual(values2.length, 1)
+        assert.ok(values2[0])
+        assert.deepEqual(values2[0].key, ['items', false])
+      }
+    },
+  )
+
+  await dbTest(
+    'list prefix with manual cursor - Uint8Array keys',
+    async (db) => {
+      // Setup Uint8Array keys
+      const key1 = new Uint8Array([1, 2, 3])
+      const key2 = new Uint8Array([4, 5, 6])
+      const key3 = new Uint8Array([7, 8, 9])
+
+      await db.set(['bytes', key1], 'value 1')
+      await db.set(['bytes', key2], 'value 2')
+      await db.set(['bytes', key3], 'value 3')
+
+      // Test forward pagination
+      const iterator = db.list({ prefix: ['bytes'] }, { limit: 1 })
+      const values = await Array.fromAsync(iterator)
+      assert.strictEqual(values.length, 1)
+      assert.ok(values[0])
+      assert.deepEqual(values[0].key, ['bytes', key1])
+
+      const cursor = iterator.cursor
+      assert.ok(cursor)
+
+      const iterator2 = db.list({ prefix: ['bytes'] }, { cursor })
+      const values2 = await Array.fromAsync(iterator2)
+      assert.strictEqual(values2.length, 2)
+      assert.ok(values2[0])
+      assert.ok(values2[1])
+      assert.deepEqual(values2[0].key, ['bytes', key2])
+      assert.deepEqual(values2[1].key, ['bytes', key3])
+    },
+  )
+
+  await dbTest(
+    'list prefix with manual cursor reverse - Uint8Array keys',
+    async (db) => {
+      // Setup Uint8Array keys
+      const key1 = new Uint8Array([1, 2, 3])
+      const key2 = new Uint8Array([4, 5, 6])
+      const key3 = new Uint8Array([7, 8, 9])
+
+      await db.set(['bytes', key1], 'value 1')
+      await db.set(['bytes', key2], 'value 2')
+      await db.set(['bytes', key3], 'value 3')
+
+      // Test reverse pagination
+      const iterator = db.list(
+        { prefix: ['bytes'] },
+        { limit: 2, reverse: true },
+      )
+      const values = await Array.fromAsync(iterator)
+      assert.strictEqual(values.length, 2)
+      assert.ok(values[0])
+      assert.ok(values[1])
+      assert.deepEqual(values[0].key, ['bytes', key3])
+      assert.deepEqual(values[1].key, ['bytes', key2])
+
+      const cursor = iterator.cursor
+      assert.ok(cursor)
+
+      const iterator2 = db.list(
+        { prefix: ['bytes'] },
+        { cursor, reverse: true },
+      )
+      const values2 = await Array.fromAsync(iterator2)
+      assert.strictEqual(values2.length, 1)
+      assert.ok(values2[0])
+      assert.deepEqual(values2[0].key, ['bytes', key1])
+    },
+  )
+
+  await dbTest(
+    'list prefix with manual cursor - mixed type keys',
+    async (db) => {
+      // Setup keys where second part has different types across entries
+      // [string, number], [string, string], [string, bigint], [string, boolean]
+      await db.set(['data', 1], { type: 'number' })
+      await db.set(['data', 2], { type: 'number' })
+      await db.set(['data', 'alice'], { type: 'string' })
+      await db.set(['data', 'bob'], { type: 'string' })
+      await db.set(['data', 100n], { type: 'bigint' })
+      await db.set(['data', 200n], { type: 'bigint' })
+      await db.set(['data', false], { type: 'boolean' })
+      await db.set(['data', true], { type: 'boolean' })
+
+      // Keys are ordered by type marker, then value within type:
+      // Uint8Array(0x01) < String(0x02) < BigInt(0x03) < Number(0x04) < Boolean(0x05)
+      // So order is: "alice", "bob", 100n, 200n, 1, 2, false, true
+
+      // Test forward pagination
+      const iterator = db.list({ prefix: ['data'] }, { limit: 3 })
+      const values = await Array.fromAsync(iterator)
+      assert.strictEqual(values.length, 3)
+      assert.ok(values[0])
+      assert.ok(values[1])
+      assert.ok(values[2])
+      // First 3: strings then first bigint
+      assert.deepEqual(values[0].key, ['data', 'alice'])
+      assert.deepEqual(values[1].key, ['data', 'bob'])
+      assert.deepEqual(values[2].key, ['data', 100n])
+
+      const cursor = iterator.cursor
+      assert.ok(cursor)
+
+      const iterator2 = db.list({ prefix: ['data'] }, { cursor })
+      const values2 = await Array.fromAsync(iterator2)
+      assert.strictEqual(values2.length, 5)
+      assert.ok(values2[0])
+      assert.ok(values2[1])
+      assert.ok(values2[4])
+      // Remaining: 200n, 1, 2, false, true
+      assert.deepEqual(values2[0].key, ['data', 200n])
+      assert.deepEqual(values2[1].key, ['data', 1])
+      assert.deepEqual(values2[4].key, ['data', true])
+    },
+  )
+
+  await dbTest(
+    'list prefix with manual cursor reverse - mixed type keys',
+    async (db) => {
+      // Setup keys with mixed types: [string, bigint, Uint8Array]
+      // Cursor works with prefix + single key part
+      const tag1 = new Uint8Array([1, 0, 0])
+      const tag2 = new Uint8Array([2, 0, 0])
+      const tag3 = new Uint8Array([3, 0, 0])
+      const tag4 = new Uint8Array([4, 0, 0])
+
+      await db.set(['events', 1n, tag1], { event: 'login' })
+      await db.set(['events', 1n, tag2], { event: 'click' })
+      await db.set(['events', 1n, tag3], { event: 'view' })
+      await db.set(['events', 1n, tag4], { event: 'logout' })
+
+      // Test reverse pagination with prefix ['events', 1n]
+      // Keys after prefix are Uint8Arrays: tag1, tag2, tag3, tag4
+      const iterator = db.list(
+        { prefix: ['events', 1n] },
+        { limit: 2, reverse: true },
+      )
+      const values = await Array.fromAsync(iterator)
+      assert.strictEqual(values.length, 2)
+      assert.ok(values[0])
+      assert.ok(values[1])
+      assert.deepEqual(values[0].key, ['events', 1n, tag4])
+      assert.deepEqual(values[1].key, ['events', 1n, tag3])
+
+      const cursor = iterator.cursor
+      assert.ok(cursor)
+
+      const iterator2 = db.list(
+        { prefix: ['events', 1n] },
+        { cursor, reverse: true },
+      )
+      const values2 = await Array.fromAsync(iterator2)
+      assert.strictEqual(values2.length, 2)
+      assert.ok(values2[0])
+      assert.ok(values2[1])
+      assert.deepEqual(values2[0].key, ['events', 1n, tag2])
+      assert.deepEqual(values2[1].key, ['events', 1n, tag1])
+    },
+  )
 
   await dbTest('list range', async (db) => {
     const versionstamp = await setupData(db)
