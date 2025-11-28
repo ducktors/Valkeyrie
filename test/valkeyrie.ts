@@ -1012,10 +1012,7 @@ describe('test valkeyrie', async () => {
       const cursor = iterator.cursor
       assert.ok(cursor)
 
-      const iterator2 = db.list(
-        { prefix: ['nums'] },
-        { cursor, reverse: true },
-      )
+      const iterator2 = db.list({ prefix: ['nums'] }, { cursor, reverse: true })
       const values2 = await Array.fromAsync(iterator2)
       assert.strictEqual(values2.length, 7)
       assert.ok(values2[0])
@@ -1077,10 +1074,7 @@ describe('test valkeyrie', async () => {
       const cursor = iterator.cursor
       assert.ok(cursor)
 
-      const iterator2 = db.list(
-        { prefix: ['bigs'] },
-        { cursor, reverse: true },
-      )
+      const iterator2 = db.list({ prefix: ['bigs'] }, { cursor, reverse: true })
       const values2 = await Array.fromAsync(iterator2)
       assert.strictEqual(values2.length, 7)
       assert.ok(values2[0])
@@ -1123,7 +1117,10 @@ describe('test valkeyrie', async () => {
       await db.set(['items', true], 'true value')
 
       // Test reverse pagination
-      const iterator = db.list({ prefix: ['items'] }, { limit: 1, reverse: true })
+      const iterator = db.list(
+        { prefix: ['items'] },
+        { limit: 1, reverse: true },
+      )
       const values = await Array.fromAsync(iterator)
       assert.strictEqual(values.length, 1)
       assert.ok(values[0])
@@ -1132,7 +1129,10 @@ describe('test valkeyrie', async () => {
       // Get all remaining items with cursor
       const cursor = iterator.cursor
       if (cursor) {
-        const iterator2 = db.list({ prefix: ['items'] }, { cursor, reverse: true })
+        const iterator2 = db.list(
+          { prefix: ['items'] },
+          { cursor, reverse: true },
+        )
         const values2 = await Array.fromAsync(iterator2)
         assert.strictEqual(values2.length, 1)
         assert.ok(values2[0])
@@ -1186,7 +1186,10 @@ describe('test valkeyrie', async () => {
       await db.set(['bytes', key3], 'value 3')
 
       // Test reverse pagination
-      const iterator = db.list({ prefix: ['bytes'] }, { limit: 2, reverse: true })
+      const iterator = db.list(
+        { prefix: ['bytes'] },
+        { limit: 2, reverse: true },
+      )
       const values = await Array.fromAsync(iterator)
       assert.strictEqual(values.length, 2)
       assert.ok(values[0])
@@ -1197,7 +1200,10 @@ describe('test valkeyrie', async () => {
       const cursor = iterator.cursor
       assert.ok(cursor)
 
-      const iterator2 = db.list({ prefix: ['bytes'] }, { cursor, reverse: true })
+      const iterator2 = db.list(
+        { prefix: ['bytes'] },
+        { cursor, reverse: true },
+      )
       const values2 = await Array.fromAsync(iterator2)
       assert.strictEqual(values2.length, 1)
       assert.ok(values2[0])
