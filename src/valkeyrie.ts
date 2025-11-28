@@ -917,10 +917,13 @@ export class Valkeyrie<TRegistry extends SchemaRegistryType = readonly []> {
     }
   }
 
-  private decodeCursorValue(cursor: string): string {
-    const bytes = Buffer.from(cursor, 'base64')
-    // Skip type marker (0x02) and get the value bytes (excluding terminator 0x00)
-    return bytes.subarray(1, bytes.length - 1).toString('utf8')
+  private decodeCursorKey(cursor: string): Key {
+    const hash = Buffer.from(cursor, 'base64').toString('hex')
+    const decoded = this.decodeKeyHash(hash)
+    if (decoded.length === 0) {
+      throw new Error('Invalid cursor: empty key')
+    }
+    return decoded
   }
 
   private calculatePrefixBounds(
@@ -931,8 +934,7 @@ export class Valkeyrie<TRegistry extends SchemaRegistryType = readonly []> {
     const prefixHash = this.hashKey(prefix)
 
     if (cursor) {
-      const cursorValue = this.decodeCursorValue(cursor)
-      const cursorKey = [...prefix, cursorValue]
+      const cursorKey = this.decodeCursorKey(cursor)
       const cursorHash = this.hashKey(cursorKey)
 
       return reverse
@@ -960,11 +962,7 @@ export class Valkeyrie<TRegistry extends SchemaRegistryType = readonly []> {
     }
 
     if (cursor) {
-      const cursorValue = this.decodeCursorValue(cursor)
-      // For range queries, we need to reconstruct the full key
-      // by taking all parts from the start key except the last one
-      // and appending the cursor value
-      const cursorKey = [...start.slice(0, -1), cursorValue]
+      const cursorKey = this.decodeCursorKey(cursor)
       const cursorHash = this.hashKey(cursorKey)
 
       return reverse
@@ -980,10 +978,8 @@ export class Valkeyrie<TRegistry extends SchemaRegistryType = readonly []> {
     reverse = false,
   ): { startHash: string; endHash: string } {
     if (cursor) {
-      // Attempt to decode the cursor to get the actual key part
-      const cursorValue = this.decodeCursorValue(cursor)
-      // Create a key hash from the cursor value
-      const cursorHash = this.hashKey([cursorValue])
+      const cursorKey = this.decodeCursorKey(cursor)
+      const cursorHash = this.hashKey(cursorKey)
 
       return reverse
         ? { startHash: '', endHash: cursorHash }
@@ -1173,9 +1169,7 @@ export class Valkeyrie<TRegistry extends SchemaRegistryType = readonly []> {
       },
       get cursor() {
         if (!lastKey) return ''
-        const lastPart = lastKey[lastKey.length - 1]
-        if (!lastPart) return ''
-        return self.getCursorFromKey([lastPart])
+        return self.getCursorFromKey(lastKey)
       },
       async [Symbol.asyncDispose]() {
         await self.close()
