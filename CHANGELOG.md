@@ -1,5 +1,11 @@
 # valkeyrie
 
+## 0.8.3
+
+### Patch Changes
+
+- 85a9cfc: fix: cursor pagination with deep keys and non-string types
+
 ## 0.8.2
 
 ### Patch Changes
