@@ -20,6 +20,7 @@ jobs:
       id-token: write
       contents: write
       packages: write
+      attestations: write
       pull-requests: write
       issues: read
     steps:
